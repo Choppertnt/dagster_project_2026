@@ -1,0 +1,20 @@
+# .dockerignore
+
+# 🚩 ตัวแสบที่สุด: ห้ามเอาขึ้นเด็ดขาด
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+
+# 📁 ไฟล์เกี่ยวกับการทำ Git (ถ้ามี)
+.git/
+.gitignore
+
+# 📔 ไฟล์เอกสารและไฟล์ Log
+README.md
+*.log
+LICENSE
+
+# ⚙️ ไฟล์ที่ไม่จำเป็นต้องอยู่ใน Image (เพราะเราใช้ Helm คุม)
+values.yaml
+charts/

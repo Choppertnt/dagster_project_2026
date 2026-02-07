@@ -1,0 +1,31 @@
+[project]
+name = "my-dagster-project"
+version = "0.1.0"
+description = "Pipeline for migrating data from MinIO to PostgreSQL"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+
+"dagster",                # Core Orchestration
+"dagster-webserver",      # UI สำหรับดู Asset Graph
+"dagster-postgres",       # สำหรับเชื่อมต่อ PostgreSQL
+"pandas",                 # ใช้จัดการ DataFrame ที่คุณถนัด
+"minio",                  # เชื่อมต่อกับ MinIO Storage
+"sqlalchemy",             # ใช้สำหรับเขียนข้อมูลลง Database
+"supabase",
+"fastembed",
+"psycopg[binary]"
+
+
+    
+]
+
+[tool.uv]
+package = false
+
+[tool.dagster]
+module_name = "repo"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

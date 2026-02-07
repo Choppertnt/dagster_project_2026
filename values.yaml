@@ -1,0 +1,151 @@
+generatePostgresqlPasswordSecret: false
+global:
+  postgresqlSecretName: "db-dagster"
+  dagsterHome: "/opt/dagster/dagster_home"
+  celeryConfigSecretName: "dagster-celery-config-secret"
+
+dagsterWebserver:
+  replicaCount: 1
+  image:
+    repository: "docker.io/dagster/dagster-celery-k8s"
+    tag: ~
+    pullPolicy: Always
+  
+  checkDbReadyInitContainer: false
+  
+  # ❌ ลบ securityContext ออกให้หมด (ถ้ามี)
+  securityContext: {}
+
+  service:
+      type: ClusterIP
+      port: 8080  # 👈 เปลี่ยนจาก 80 เป็น 8080
+      annotations: {}
+
+
+# 2. ✅ แก้ Probe ที่ใช้เช็คสถานะ ให้เช็คที่ 8080 ด้วย
+  readinessProbe:
+    httpGet:
+      path: "/server_info"
+      port: 8080  # 👈 เปลี่ยนจาก 80 เป็น 8080
+    periodSeconds: 20
+    timeoutSeconds: 10
+    successThreshold: 1
+    failureThreshold: 3
+
+  env:
+    - name: DAGSTER_WEBSERVER_PORT
+      value: "8080"  # 👈 เพิ่มบรรทัดนี้ครับ สั่งให้แอปเปิดที่ 8080
+    - name: DAGSTER_TELEMETRY_ENABLED
+      value: "false"
+    - name: HOME
+      value: "/opt/dagster/dagster_home"
+    - name: DAGSTER_PG_HOST
+      value: "internal-postgres-postgresql"
+    - name: DAGSTER_PG_USER
+      value: "dagster_user"
+    - name: DAGSTER_PG_DB
+      value: "dagster_metadata"
+    - name: DAGSTER_PG_PASSWORD
+      valueFrom:
+        secretKeyRef: 
+          name: "db-dagster"
+          key: "postgresql-password"
+  envSecrets:
+    - name: db-dagster
+
+  # ✅ เพิ่ม: สร้างพื้นที่ชั่วคราวให้เขียนไฟล์ได้
+  volumes:
+    - name: dagster-home-vol
+      emptyDir: {}
+  
+  # ✅ เพิ่ม: Mount ทับลงไปเลย Permission จะผ่านทันที
+  volumeMounts:
+    - name: dagster-home-vol
+      mountPath: "/opt/dagster/dagster_home"
+
+dagsterDaemon:
+  enabled: true
+  image:
+    repository: "docker.io/dagster/dagster-celery-k8s"
+    tag: ~
+    pullPolicy: Always
+
+  securityContext: {}
+
+  env:
+    - name: HOME
+      value: "/opt/dagster/dagster_home"
+    - name: DAGSTER_PG_HOST
+      value: "internal-postgres-postgresql"
+    - name: DAGSTER_PG_USER
+      value: "dagster_user"
+    - name: DAGSTER_PG_DB
+      value: "dagster_metadata"
+    - name: DAGSTER_PG_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: "db-dagster"
+          key: "postgresql-password"
+  envSecrets:
+    - name: db-dagster
+
+  # ✅ เพิ่มให้ Daemon ด้วย
+  volumes:
+    - name: dagster-home-vol
+      emptyDir: {}
+  volumeMounts:
+    - name: dagster-home-vol
+      mountPath: "/opt/dagster/dagster_home"
+
+dagster-user-deployments:
+  enabled: true
+  deployments:
+    - name: "my-data-pipeline"
+      image:
+        repository: "image-registry.openshift-image-registry.svc:5000/thanathorn55551-dev/dagster-assets"
+        tag: "latest"
+        pullPolicy: Always
+      
+      securityContext: {}
+
+      dagsterApiGrpcArgs:
+        - "--python-file"
+        - "repo.py"
+      port: 3030
+      
+      # ✅ เพิ่ม Env ตรงนี้ครับ (เปลี่ยนที่เก็บ Cache มาลงที่ที่เขียนได้)
+      env:
+        - name: HOME
+          value: "/opt/dagster/dagster_home"
+        - name: HF_HOME
+          value: "/opt/dagster/dagster_home/huggingface"
+        - name: TRANSFORMERS_CACHE
+          value: "/opt/dagster/dagster_home/huggingface"
+
+      envSecrets:
+        - name: db-dagster
+
+      volumes:
+        - name: dagster-home-vol
+          emptyDir: {}
+      volumeMounts:
+        - name: dagster-home-vol
+          mountPath: "/opt/dagster/dagster_home"
+
+postgresql:
+  enabled: false
+  postgresqlHost: "internal-postgres-postgresql"
+  postgresqlUsername: "dagster_user"
+  postgresqlDatabase: "dagster_metadata"
+  service:
+    port: 5432
+
+
+
+runLauncher:
+  type: K8sRunLauncher
+  config:
+    k8sRunLauncher:
+      imagePullPolicy: "Always"
+      envSecrets:
+        - name: db-dagster
