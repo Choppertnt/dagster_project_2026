@@ -280,3 +280,54 @@ def migrate_to_silver_history(context: AssetExecutionContext, migrate_to_bronze_
         "product_id", "product_name", "category", "brand", "base_price", 
         "start_date", "end_date", "is_current", "product_vector"
     ])
+
+
+@asset()
+def user_profile_silver(context: AssetExecutionContext ):
+    try:
+        with psycopg.connect(CONN_STR) as conn:
+            with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+                # 1. ดึงข้อมูล Active ปัจจุบันจาก Postgres มาเปรียบเทียบ
+                cur.execute("TRUNCATE TABLE dim_user_history RESTART IDENTITY;")
+
+                cur.execute('''    
+                INSERT INTO dim_user_history (user_id, name, gender, member_tier, start_date, end_date, is_current)
+
+
+                WITH ordered_events AS (
+                    SELECT 
+                        user_id,
+                        name,
+                        gender,
+                        member_tier,
+                        upload_date AS start_date, -- เวลาที่เกิดเหตุการณ์ คือเวลาเริ่ม
+                        
+                        -- ฟังก์ชัน LEAD จะไปดึง upload_date ของแถวถัดไปมาให้
+                        LEAD(upload_date) OVER (PARTITION BY user_id ORDER BY upload_date) AS next_event_date
+                    FROM 
+                        stg_userprofile
+                )
+
+                SELECT
+                    user_id,
+                    name,
+                    gender,
+                    member_tier,
+                    start_date,
+                    -- ถ้ามีเหตุการณ์ถัดไป ให้ใช้เวลานั้นเป็น end_date
+                    -- ถ้าไม่มี (เป็นแถวล่าสุด) ให้ end_date เป็น NULL
+                    next_event_date AS end_date,
+                    -- ถ้า end_date เป็น NULL แสดงว่าเป็นปัจจุบัน (is_current = TRUE)
+                    CASE 
+                        WHEN next_event_date IS NULL THEN TRUE 
+                        ELSE FALSE 
+                    END AS is_current
+                FROM 
+                    ordered_events;''')
+                
+                conn.commit()
+                context.log.info("✅ Rebuilt Silver Table (SCD Type 2) Successfully")
+    except Exception as e:  # <--- ❌ คุณน่าจะลืมก๊อปปี้ส่วนนี้ไปครับ
+            context.log.error(f"❌ Pipeline Failed: {e}")
+            raise e
+                

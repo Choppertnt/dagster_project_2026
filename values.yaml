@@ -4,6 +4,15 @@ global:
   dagsterHome: "/opt/dagster/dagster_home"
   celeryConfigSecretName: "dagster-celery-config-secret"
 
+dagster:
+  postgres:
+    user: "dagster_user"
+    password:
+      env: "DB_PASS"  # ชื่อ Key ใน Secret
+    host: "internal-postgres-postgresql" # ⚠️ เช็คชื่อ Service ดีๆ (ดูวิธีเช็คด้านล่าง)
+    database: "dagster_metadata"
+    port: 5432
+
 dagsterWebserver:
   replicaCount: 1
   image:
@@ -52,16 +61,17 @@ dagsterWebserver:
           key: "postgresql-password"
   envSecrets:
     - name: db-dagster
+    - name: db-credentials
 
-  # ✅ เพิ่ม: สร้างพื้นที่ชั่วคราวให้เขียนไฟล์ได้
-  volumes:
-    - name: dagster-home-vol
-      emptyDir: {}
+  # # ✅ เพิ่ม: สร้างพื้นที่ชั่วคราวให้เขียนไฟล์ได้
+  # volumes:
+  #   - name: dagster-home-vol
+  #     emptyDir: {}
   
-  # ✅ เพิ่ม: Mount ทับลงไปเลย Permission จะผ่านทันที
-  volumeMounts:
-    - name: dagster-home-vol
-      mountPath: "/opt/dagster/dagster_home"
+  # # ✅ เพิ่ม: Mount ทับลงไปเลย Permission จะผ่านทันที
+  # volumeMounts:
+  #   - name: dagster-home-vol
+  #     mountPath: "/opt/dagster/dagster_home"
 
 dagsterDaemon:
   enabled: true
@@ -88,14 +98,15 @@ dagsterDaemon:
           key: "postgresql-password"
   envSecrets:
     - name: db-dagster
+    - name: db-credentials
 
-  # ✅ เพิ่มให้ Daemon ด้วย
-  volumes:
-    - name: dagster-home-vol
-      emptyDir: {}
-  volumeMounts:
-    - name: dagster-home-vol
-      mountPath: "/opt/dagster/dagster_home"
+  # # ✅ เพิ่มให้ Daemon ด้วย
+  # volumes:
+  #   - name: dagster-home-vol
+  #     emptyDir: {}
+  # volumeMounts:
+  #   - name: dagster-home-vol
+  #     mountPath: "/opt/dagster/dagster_home"
 
 dagster-user-deployments:
   enabled: true
@@ -124,6 +135,7 @@ dagster-user-deployments:
 
       envSecrets:
         - name: db-dagster
+        - name: db-credentials
 
       volumes:
         - name: dagster-home-vol

@@ -11,6 +11,7 @@ RUN uv pip install --system dagster-postgres dagster-k8s
 
 # Copy เฉพาะโค้ด Assets และ Repo
 COPY assets/ ./assets/
+COPY jobs/ ./jobs/
 COPY repo.py .
 
 # กำหนด DAGSTER_HOME
