@@ -8,6 +8,7 @@ from fastembed import TextEmbedding
 from datetime import datetime
 import urllib.parse
 import psycopg
+import requests
 # ข้อมูลการเชื่อมต่อ (แนะนำให้ใช้ Environment Variables เพื่อความปลอดภัยครับ)
 MINIO_ENDPOINT = "minio-api-route-thanathorn55551-dev.apps.rm2.thpm.p1.openshiftapps.com"
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
@@ -27,6 +28,8 @@ encoded_pass = urllib.parse.quote_plus(DB_PASS) if DB_PASS else ""
 CONN_STR = f"postgresql://{DB_USER}:{encoded_pass}@{DB_HOST}:5432/{DB_NAME}"
 
 embedding_model = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
+
+
 @asset
 def raw_products_from_minio(context: AssetExecutionContext):
     # 1. สร้างการเชื่อมต่อกับ MinIO Client
@@ -327,7 +330,84 @@ def user_profile_silver(context: AssetExecutionContext ):
                 
                 conn.commit()
                 context.log.info("✅ Rebuilt Silver Table (SCD Type 2) Successfully")
-    except Exception as e:  # <--- ❌ คุณน่าจะลืมก๊อปปี้ส่วนนี้ไปครับ
-            context.log.error(f"❌ Pipeline Failed: {e}")
-            raise e
+    except Exception as e:
+        # 🚨 แจ้งเตือนตรงนี้ครับ!
+        error_msg = f"☠️ PIPELINE DIED!\nAsset: user_profile_silver\nError: {str(e)}"
+        context.log.error(f"❌ Pipeline Failed: {e}")
+        raise e # สำคัญมาก! ต้อง raise เพื่อให้ Dagster รู้ว่า Job นี้ Failed
+
+
+
+
+
+
+@asset(
+    description="เช็คสต็อกเหลือน้อย และแจ้งเตือนผ่าน LINE OA (Messaging API)"
+)
+def stock_alert_job(context: AssetExecutionContext):
+    with psycopg.connect(CONN_STR) as conn:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+            
+            sql = \
+            f"""
+            WITH current_stock AS (
+                SELECT 
+                    product_id, 
+                    warehouse_id, 
+                    quantity 
+                FROM public.inventory_current 
+                WHERE quantity < 10
+            ),
+            last_alerts AS (
+                SELECT 
+                    product_id, 
+                    warehouse_id, 
+                    MAX(alerted_at) as last_alert_time
+                FROM public.alert_history
+                GROUP BY product_id, warehouse_id
+            )
+            SELECT 
+                c.product_id, 
+                c.warehouse_id, 
+                c.quantity,
+                l.last_alert_time
+            FROM current_stock c
+            LEFT JOIN last_alerts l 
+                ON c.product_id = l.product_id 
+                AND c.warehouse_id = l.warehouse_id
+            WHERE 
+                l.last_alert_time IS NULL 
+                OR l.last_alert_time < NOW() - INTERVAL '{ALERT_COOLDOWN_MINUTES} minutes'
+            """
+            cur.execute(sql)
+            rows = cur.fetchall()
+            
+            if not rows:
+                context.log.info("✅ No new alerts needed.")
+                return
+            
+            context.log.info(f"🔥 Found {len(rows)} items to alert!")    
+            
+            for row in rows:
+                p_id = row['product_id']
+                wh_id = row['warehouse_id']
+                qty = row['quantity']
+
+                # แต่งข้อความ
+                msg = f"⚠️ ALARM: Low Stock!\n--------------------\n📦 Product: {p_id}\n🏭 Warehouse: {wh_id}\n📉 Qty: {qty}\n--------------------\n(System will cooldown for {ALERT_COOLDOWN_MINUTES} mins)"
                 
+                # ส่ง LINE
+                send_line_oa_push(msg)
+                context.log.info(f"Sent LINE OA Push for {p_id}")
+
+                # บันทึกประวัติลง DB
+                # ⚠️ สังเกตการใช้ %s แทน f-string เพื่อความปลอดภัย
+                insert_sql = """
+                    INSERT INTO public.alert_history (product_id, warehouse_id, quantity, alerted_at)
+                    VALUES (%s, %s, %s, NOW())
+                """
+                cur.execute(insert_sql, (p_id, wh_id, qty))
+        conn.commit()
+        
+
+    
