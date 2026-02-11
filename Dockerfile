@@ -13,6 +13,7 @@ RUN uv pip install --system dagster-postgres dagster-k8s
 COPY assets/ ./assets/
 COPY jobs/ ./jobs/
 COPY repo.py .
+COPY sensors/ ./sensors/
 
 # กำหนด DAGSTER_HOME
 ENV DAGSTER_HOME=/opt/dagster/dagster_home
