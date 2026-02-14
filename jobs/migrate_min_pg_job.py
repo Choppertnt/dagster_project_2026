@@ -27,6 +27,6 @@ alert_job = define_asset_job(
 # ตั้งเวลาให้รันทุกๆ 1 นาที (Cron: */1 * * * *)
 alert_schedule = ScheduleDefinition(
     job=alert_job,
-    cron_schedule="1 * * * *", 
+    cron_schedule="* * * * *", 
     execution_timezone="Asia/Bangkok"
 )

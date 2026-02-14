@@ -9,6 +9,7 @@ from datetime import datetime
 import urllib.parse
 import psycopg
 import requests
+from sensors.failure_alerts import send_line_oa_push
 # ข้อมูลการเชื่อมต่อ (แนะนำให้ใช้ Environment Variables เพื่อความปลอดภัยครับ)
 MINIO_ENDPOINT = "minio-api-route-thanathorn55551-dev.apps.rm2.thpm.p1.openshiftapps.com"
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
@@ -339,7 +340,7 @@ def user_profile_silver(context: AssetExecutionContext ):
 
 
 
-
+ALERT_COOLDOWN_MINUTES = 3600
 
 @asset(
     description="เช็คสต็อกเหลือน้อย และแจ้งเตือนผ่าน LINE OA (Messaging API)"
@@ -354,22 +355,23 @@ def stock_alert_job(context: AssetExecutionContext):
                 SELECT 
                     product_id, 
                     warehouse_id, 
-                    quantity 
-                FROM public.inventory_current 
-                WHERE quantity < 10
+                    stock_level 
+                FROM fct_inventory_history
+                WHERE is_current = TRUE and stock_level < 10
             ),
             last_alerts AS (
                 SELECT 
                     product_id, 
                     warehouse_id, 
                     MAX(alerted_at) as last_alert_time
-                FROM public.alert_history
+                FROM alert_history
                 GROUP BY product_id, warehouse_id
             )
+
             SELECT 
                 c.product_id, 
                 c.warehouse_id, 
-                c.quantity,
+                c.stock_level,
                 l.last_alert_time
             FROM current_stock c
             LEFT JOIN last_alerts l 
@@ -391,7 +393,7 @@ def stock_alert_job(context: AssetExecutionContext):
             for row in rows:
                 p_id = row['product_id']
                 wh_id = row['warehouse_id']
-                qty = row['quantity']
+                qty = row['stock_level']
 
                 # แต่งข้อความ
                 msg = f"⚠️ ALARM: Low Stock!\n--------------------\n📦 Product: {p_id}\n🏭 Warehouse: {wh_id}\n📉 Qty: {qty}\n--------------------\n(System will cooldown for {ALERT_COOLDOWN_MINUTES} mins)"
