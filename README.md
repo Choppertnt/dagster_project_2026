@@ -1,6 +1,6 @@
 
 วิธีการรัน
 
-ีuv sync
+uv sync
 
 uv run dagster dev -f repo.py
