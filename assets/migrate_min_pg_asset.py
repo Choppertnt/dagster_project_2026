@@ -295,7 +295,7 @@ def user_profile_silver(context: AssetExecutionContext ):
                 cur.execute("TRUNCATE TABLE dim_user_history RESTART IDENTITY;")
 
                 cur.execute('''    
-                INSERT INTO dim_user_history (user_id, name, gender, member_tier, start_date, end_date, is_current)
+                INSERT INTO dim_user_history (user_id, name, gender, member_tier,date_of_birth, start_date, end_date, is_current)
 
 
                 WITH ordered_events AS (
@@ -304,6 +304,7 @@ def user_profile_silver(context: AssetExecutionContext ):
                         name,
                         gender,
                         member_tier,
+                        date_of_birth,
                         upload_date AS start_date, -- เวลาที่เกิดเหตุการณ์ คือเวลาเริ่ม
                         
                         -- ฟังก์ชัน LEAD จะไปดึง upload_date ของแถวถัดไปมาให้
@@ -317,6 +318,7 @@ def user_profile_silver(context: AssetExecutionContext ):
                     name,
                     gender,
                     member_tier,
+                    date_of_birth,
                     start_date,
                     -- ถ้ามีเหตุการณ์ถัดไป ให้ใช้เวลานั้นเป็น end_date
                     -- ถ้าไม่มี (เป็นแถวล่าสุด) ให้ end_date เป็น NULL
