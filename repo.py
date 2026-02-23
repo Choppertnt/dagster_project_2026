@@ -10,4 +10,4 @@ defs = Definitions(
     jobs=[scd2_job,alert_job],
     schedules = [scd2_schedule,alert_schedule],
     sensors=[line_oa_failure_sensor]
-)
+) 
