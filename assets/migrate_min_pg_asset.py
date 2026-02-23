@@ -71,7 +71,7 @@ def raw_products_from_minio(context: AssetExecutionContext):
 
 
 @asset
-def raw_products_from_minio2(context: AssetExecutionContext):
+def raw_inventory_from_minio(context: AssetExecutionContext):
     # 1. สร้างการเชื่อมต่อกับ MinIO Client
     context.log.info(f"กำลังเชื่อมต่อกับ MinIO ที่: {MINIO_ENDPOINT}")
     
@@ -109,7 +109,7 @@ def raw_products_from_minio2(context: AssetExecutionContext):
             response.release_conn()
 
 @asset(deps=['raw_products_from_minio'])
-def migrate_to_bronze_tables(context: AssetExecutionContext , raw_products_from_minio):
+def product_silver(context: AssetExecutionContext , raw_products_from_minio):
     df = raw_products_from_minio
     
     # 1. เตรียมข้อมูลเป็น List of Tuples สำหรับ psycopg
@@ -150,9 +150,9 @@ def migrate_to_bronze_tables(context: AssetExecutionContext , raw_products_from_
     return df
 
 
-@asset(deps=['raw_products_from_minio2'])
-def migrate_to_bronze_tables2(context: AssetExecutionContext , raw_products_from_minio2):
-    df = raw_products_from_minio2
+@asset(deps=['raw_inventory_from_minio'])
+def inventory_silver(context: AssetExecutionContext , raw_inventory_from_minio):
+    df = raw_inventory_from_minio
     
     # 1. เตรียมข้อมูลเป็น List of Tuples สำหรับ psycopg
     # ตรวจสอบให้แน่ใจว่าชื่อ Column ใน DataFrame ตรงกับใน Postgres
@@ -191,12 +191,12 @@ def migrate_to_bronze_tables2(context: AssetExecutionContext , raw_products_from
         
     return df
 
-@asset(deps=['migrate_to_bronze_tables'])
-def migrate_to_silver_history(context: AssetExecutionContext, migrate_to_bronze_tables):
+@asset(deps=['product_silver'])
+def migrate_to_silver_history(context: AssetExecutionContext, product_silver):
     """
     ขั้นตอน Silver: ทำ Vector Search และเก็บประวัติแบบ SCD Type 2 ลง PostgreSQL
     """
-    df_bronze = migrate_to_bronze_tables
+    df_bronze = product_silver
     now = datetime.utcnow()
 
     if df_bronze.empty:

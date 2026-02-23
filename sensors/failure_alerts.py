@@ -2,8 +2,9 @@ from dagster import run_failure_sensor, RunFailureSensorContext, DefaultSensorSt
 import requests
 
 # --- CONFIG LINE OA ---
-LINE_CHANNEL_ACCESS_TOKEN = "uOmAHmG3HuvTEEtyZe2VyNnhOTdjWfqMbtNSZuhUG+4u8ubqzK4ygeEPVxfWVSg48mUe3zWYwekMAV1HKdgwaR1LlMa7kf/vhDwg/vJCBKEbrxKtMKFY7YtnmlKq8tiZHQiSCDnPTXNq2tvUYJ+shAdB04t89/1O/w1cDnyilFU="
-LINE_ADMIN_USER_ID = "Ue6bdf5351b582d3afeb23f236603b531"
+
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS")
+LINE_ADMIN_USER_ID = os.getenv("LINE_ADMIN_USER")
 
 def send_line_oa_push(message):
     url = 'https://api.line.me/v2/bot/message/push'
