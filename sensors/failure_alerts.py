@@ -1,5 +1,6 @@
 from dagster import run_failure_sensor, RunFailureSensorContext, DefaultSensorStatus
 import requests
+import os
 
 # --- CONFIG LINE OA ---
 
