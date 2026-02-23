@@ -29,10 +29,14 @@ pipeline {
             steps {
                 script {
                     echo "อัปเดต Dagster Deployment ไปใช้เวอร์ชัน ${IMAGE_TAG}..."
-                    // สั่งเปลี่ยน Image ใน Deployment ให้ OpenShift สลับ Pod เก่า-ใหม่ แบบไร้รอยต่อ
+                    
+                    // 🌟 สร้างที่อยู่เต็มๆ ของ Image ใน OpenShift
+                    def FULL_IMAGE_URL = "image-registry.openshift-image-registry.svc:5000/${NAMESPACE}/${APP_NAME}:${IMAGE_TAG}"
+                    
+                    // สั่งเปลี่ยน Image โดยใช้ FULL_IMAGE_URL แทน
                     sh """
                         oc set image deployment/${DEPLOYMENT_NAME} \
-                        *=${APP_NAME}:${IMAGE_TAG} \
+                        *=${FULL_IMAGE_URL} \
                         -n ${NAMESPACE}
                     """
                 }
