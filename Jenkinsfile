@@ -24,25 +24,20 @@ pipeline {
             steps {
                 script {
                     echo "อัปเดต Dagster Deployment ไปใช้เวอร์ชัน ${IMAGE_TAG}..."
+                    
                     def FULL_IMAGE_URL = "image-registry.openshift-image-registry.svc:5000/${NAMESPACE}/${APP_NAME}:${IMAGE_TAG}"
                     
+                    // 🎯 จุดที่อัปเกรด: สั่งเปลี่ยนทั้ง Image และตัวแปร DAGSTER_CURRENT_IMAGE
                     sh """
+                        # 1. เปลี่ยน Image ของ Container
                         oc set image deployment/${DEPLOYMENT_NAME} \
                         dagster-user-deployments=${FULL_IMAGE_URL} \
                         -n ${NAMESPACE}
-                    """
-                }
-            }
-        }
-
-        stage('3. Update Dagster Workspace (UI)') {
-            steps {
-                script {
-                    echo "เปลี่ยนป้ายชื่อใน Workspace ConfigMap ให้เป็น ${IMAGE_TAG}..."
-                    sh """
-                        oc get configmap dagster-release-workspace-yaml -n ${NAMESPACE} -o yaml | \
-                        sed "s|${APP_NAME}:[a-zA-Z0-9._-]*|${APP_NAME}:${IMAGE_TAG}|g" | \
-                        oc apply -f -
+                        
+                        # 2. เปลี่ยนชื่อในตัวแปรที่หน้าเว็บ Dagster ใช้แสดงผล
+                        oc set env deployment/${DEPLOYMENT_NAME} \
+                        DAGSTER_CURRENT_IMAGE=${FULL_IMAGE_URL} \
+                        -n ${NAMESPACE}
                     """
                 }
             }
