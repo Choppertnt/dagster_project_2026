@@ -33,10 +33,10 @@ pipeline {
                     // 🌟 สร้างที่อยู่เต็มๆ ของ Image ใน OpenShift
                     def FULL_IMAGE_URL = "image-registry.openshift-image-registry.svc:5000/${NAMESPACE}/${APP_NAME}:${IMAGE_TAG}"
                     
-                    // สั่งเปลี่ยน Image โดยใช้ FULL_IMAGE_URL แทน
+                    // 🎯 จุดที่แก้: ระบุเป้าหมายเป็น dagster-user-deployments=... แบบเจาะจง!
                     sh """
                         oc set image deployment/${DEPLOYMENT_NAME} \
-                        *=${FULL_IMAGE_URL} \
+                        dagster-user-deployments=${FULL_IMAGE_URL} \
                         -n ${NAMESPACE}
                     """
                 }
