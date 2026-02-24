@@ -1,0 +1,22 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cleanup-completed-dagster-runs
+  namespace: thanathorn55551-dev
+spec:
+  schedule: "0 * * * *" # รันทุกๆ ต้นชั่วโมง (เช่น 13:00, 14:00)
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: default # อาจจะต้องใช้ ServiceAccount ที่มีสิทธิ์ลบ pod
+          containers:
+          - name: kubectl-container
+            image: bitnami/kubectl:latest
+            command:
+            - /bin/sh
+            - -c
+            - "kubectl delete pod --field-selector=status.phase=Succeeded -l dagster/job -n thanathorn55551-dev"
+          restartPolicy: OnFailure
