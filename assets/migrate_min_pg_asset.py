@@ -293,19 +293,20 @@ def user_profile_silver(context: AssetExecutionContext):
             with conn.cursor() as cur:
                 
                 # ---------------------------------------------------------
-                # Step 1: ปิดประวัติเก่า (UPDATE)
-                # เราจะลด end_date ลง 1 วัน (หรือ 1 วินาที) จากวันที่เริ่มประวัติใหม่
+                # --- Step 1: ปิดแถวที่เคย Active อยู่ในตาราง Dimension ---
+                # เราจะเอาเวลา "เริ่มแรกสุด" ของ Batch ที่เข้ามาใหม่มาเป็นตัวปิด
                 # ---------------------------------------------------------
                 cur.execute("""
                     UPDATE dim_user_history d
-                    SET end_date = s.upload_date - INTERVAL '1 day', -- ลดลง 1 วันตามที่คุณต้องการ
+                    SET end_date = s_first.min_upload_date, 
                         is_current = FALSE
-                    FROM stg_userprofile s
-                    WHERE d.user_id = s.user_id 
-                      AND d.is_current = TRUE
-                      AND (d.member_tier <> s.member_tier 
-                           OR d.name <> s.name 
-                           OR d.gender <> s.gender);
+                    FROM (
+                        SELECT user_id, MIN(upload_date) as min_upload_date
+                        FROM stg_userprofile
+                        GROUP BY user_id
+                    ) s_first
+                    WHERE d.user_id = s_first.user_id 
+                      AND d.is_current = TRUE;
                 """)
 
                 # ---------------------------------------------------------
@@ -317,22 +318,19 @@ def user_profile_silver(context: AssetExecutionContext):
                     INSERT INTO dim_user_history 
                     (user_id, name, gender, member_tier, date_of_birth, start_date, end_date, is_current)
                     SELECT 
-                        s.user_id, 
-                        s.name, 
-                        s.gender, 
-                        s.member_tier, 
-                        s.date_of_birth, 
-                        s.upload_date AS start_date, -- วันที่เริ่มคือวันที่อัปโหลด
-                        '9999-12-31 23:59:59' AS end_date, 
-                        TRUE AS is_current
-                    FROM stg_userprofile s
-                    LEFT JOIN dim_user_history d 
-                      ON s.user_id = d.user_id AND d.is_current = TRUE
-                    WHERE d.user_id IS NULL;
+                        user_id, name, gender, member_tier, date_of_birth,
+                        upload_date AS start_date,
+                        COALESCE(next_upload_date, '9999-12-31 23:59:59') AS end_date,
+                        CASE WHEN next_upload_date IS NULL THEN TRUE ELSE FALSE END AS is_current
+                    FROM (
+                        SELECT *,
+                               LEAD(upload_date) OVER (PARTITION BY user_id ORDER BY upload_date) AS next_upload_date
+                        FROM stg_userprofile
+                    ) ordered_stg;
                 """)
 
                 conn.commit()
-                context.log.info("✅ Incremental SCD2: Silver records closed 1 day before Gold starts.")
+                context.log.info("✅ SCD Type 2 Fixed: Dates are contiguous and no duplicates.")
                 
     except Exception as e:
         conn.rollback() 
