@@ -1,4 +1,4 @@
-from dagster import asset, AssetExecutionContext , AssetIn
+from dagster import asset, AssetExecutionContext , AssetIn , Config
 import pandas as pd
 from minio import Minio 
 import io
@@ -16,6 +16,10 @@ MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
 
 
+
+class UserProfileConfig(Config):
+    start_after: str
+    end_at: str
 
 from dagster import asset, AssetExecutionContext
 
@@ -287,15 +291,12 @@ def migrate_to_silver_history(context: AssetExecutionContext, product_silver):
 
 
 @asset()
-def user_profile_silver(context: AssetExecutionContext):
+def user_profile_silver(context: AssetExecutionContext , config: UserProfileConfig):
     try:
         with psycopg.connect(CONN_STR) as conn:
             with conn.cursor() as cur:
                 
-                # ---------------------------------------------------------
-                # --- Step 1: ปิดแถวที่เคย Active อยู่ในตาราง Dimension ---
-                # เราจะเอาเวลา "เริ่มแรกสุด" ของ Batch ที่เข้ามาใหม่มาเป็นตัวปิด
-                # ---------------------------------------------------------
+            # --- Step 1: ปิดประวัติเก่า เฉพาะเมื่อมีข้อมูลใหม่ "ที่ต่างจากเดิม" เข้ามาเท่านั้น ---
                 cur.execute("""
                     UPDATE dim_user_history d
                     SET end_date = s_first.min_upload_date, 
@@ -303,17 +304,16 @@ def user_profile_silver(context: AssetExecutionContext):
                     FROM (
                         SELECT user_id, MIN(upload_date) as min_upload_date
                         FROM stg_userprofile
+                        WHERE upload_date > %(start_after)s AND upload_date <= %(end_at)s
                         GROUP BY user_id
                     ) s_first
                     WHERE d.user_id = s_first.user_id 
-                      AND d.is_current = TRUE;
-                """)
+                      AND d.is_current = TRUE
+                      -- ป้องกัน Zero-duration: ปิดเฉพาะถ้าวันเริ่มใหม่ "ไม่ใช่" วันเดียวกับวันเริ่มเดิม
+                      AND d.start_date < s_first.min_upload_date;
+                """, config.dict())
 
-                # ---------------------------------------------------------
-                # Step 2: สร้างประวัติใหม่ (INSERT)
-                # ดึงข้อมูลจาก stg_userprofile ไปใส่เป็นแถวใหม่
-                # (ครอบคลุมทั้ง "ลูกค้าใหม่เอี่ยม" และ "ลูกค้าเก่าที่เพิ่งถูกปิดประวัติไปใน Step 1")
-                # ---------------------------------------------------------
+                # --- Step 2: Insert เฉพาะแถวที่ "ยังไม่มี" ใน Dimension เท่านั้น ---
                 cur.execute("""
                     INSERT INTO dim_user_history 
                     (user_id, name, gender, member_tier, date_of_birth, start_date, end_date, is_current)
@@ -324,15 +324,17 @@ def user_profile_silver(context: AssetExecutionContext):
                         CASE WHEN next_upload_date IS NULL THEN TRUE ELSE FALSE END AS is_current
                     FROM (
                         SELECT *,
-                               -- PARTITION BY user_id สำคัญมาก! เพื่อแยกห้องใครห้องมัน
-                               LEAD(upload_date) OVER (PARTITION BY user_id ORDER BY upload_date) AS next_upload_date,
-                               -- ใช้ ROW_NUMBER เพื่อกำจัดแถวที่ซ้ำกันในวินาทีเดียวกัน (ถ้ามี)
-                               ROW_NUMBER() OVER (PARTITION BY user_id, member_tier ORDER BY upload_date DESC) as rn
+                               LEAD(upload_date) OVER (PARTITION BY user_id ORDER BY upload_date) AS next_upload_date
                         FROM stg_userprofile
+                        WHERE upload_date > %(start_after)s AND upload_date <= %(end_at)s
                     ) ordered_stg
-                    WHERE rn = 1; -- เอาเฉพาะสถานะล่าสุดถ้ามีการส่ง Tier เดิมซ้ำมาในวินาทีเดียวกัน
-                """)
-
+                    WHERE NOT EXISTS (
+                        -- เช็คป้องกันการ Insert ซ้ำ ถ้ามี User+Tier+StartDate นี้อยู่แล้วไม่ต้องทำ
+                        SELECT 1 FROM dim_user_history target 
+                        WHERE target.user_id = ordered_stg.user_id 
+                          AND target.start_date = ordered_stg.upload_date
+                    );
+                """, config.dict())
                 conn.commit()
                 context.log.info("✅ SCD Type 2 Fixed: Dates are contiguous and no duplicates.")
                 
