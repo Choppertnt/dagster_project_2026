@@ -1,6 +1,6 @@
 import os
 import boto3
-from dagster import sensor, RunRequest, define_asset_job, AssetSelection
+from dagster import sensor, RunRequest
 from jobs.migrate_min_pg_job import product_job
 
 @sensor(job=product_job) # ตรวจสอบว่าชื่อ job ตรงกับที่นิยามไว้ใน repo.py
