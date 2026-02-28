@@ -7,7 +7,7 @@ from jobs.migrate_min_pg_job import product_job
 def minio_product_csv_sensor(context):
     s3 = boto3.client(
         "s3",
-        endpoint_url=os.getenv("MINIO_ENDPOINT"),
+        endpoint_url="http://minio-api-route-thanathorn55551-dev.apps.rm2.thpm.p1.openshiftapps.com",
         aws_access_key_id=os.getenv("MINIO_ACCESS_KEY"),
         aws_secret_access_key=os.getenv("MINIO_SECRET_KEY"),
     )

@@ -11,7 +11,7 @@ import psycopg
 import boto3
 from sensors.failure_alerts import send_line_oa_push
 # ข้อมูลการเชื่อมต่อ (แนะนำให้ใช้ Environment Variables เพื่อความปลอดภัยครับ)
-MINIO_ENDPOINT = "minio-api-route-thanathorn55551-dev.apps.rm2.thpm.p1.openshiftapps.com"
+MINIO_ENDPOINT = "http://minio-api-route-thanathorn55551-dev.apps.rm2.thpm.p1.openshiftapps.com"
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
 
@@ -43,7 +43,7 @@ def raw_products_from_minio(context: AssetExecutionContext, config: ProductFileC
 
     s3 = boto3.client(
         "s3",
-        endpoint_url=os.getenv("MINIO_ENDPOINT"),
+        endpoint_url=MINIO_ENDPOINT,
         aws_access_key_id=os.getenv("MINIO_ACCESS_KEY"),
         aws_secret_access_key=os.getenv("MINIO_SECRET_KEY"),
     )
