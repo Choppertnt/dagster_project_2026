@@ -14,7 +14,8 @@ dependencies = [
 "sqlalchemy",             # ใช้สำหรับเขียนข้อมูลลง Database
 "supabase",
 "fastembed",
-"psycopg[binary]"
+"psycopg[binary]",
+"boto3"
 
 
     
