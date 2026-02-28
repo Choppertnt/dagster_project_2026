@@ -294,17 +294,15 @@ def user_profile_silver(context: AssetExecutionContext):
                 
                 # ---------------------------------------------------------
                 # Step 1: ปิดประวัติเก่า (UPDATE)
-                # มองหาคนใน stg_userprofile ที่มีประวัติเดิมอยู่ใน dim_user_history
-                # แล้วทำการปิด end_date ด้วยเวลา upload_date จาก staging
+                # เราจะลด end_date ลง 1 วัน (หรือ 1 วินาที) จากวันที่เริ่มประวัติใหม่
                 # ---------------------------------------------------------
                 cur.execute("""
                     UPDATE dim_user_history d
-                    SET end_date = s.upload_date, 
+                    SET end_date = s.upload_date - INTERVAL '1 day', -- ลดลง 1 วันตามที่คุณต้องการ
                         is_current = FALSE
                     FROM stg_userprofile s
                     WHERE d.user_id = s.user_id 
                       AND d.is_current = TRUE
-                      -- เช็คเฉพาะคนที่มีการเปลี่ยนแปลงจริงๆ (ถ้าข้อมูลเหมือนเดิมเป๊ะก็ไม่ต้องทำอะไร)
                       AND (d.member_tier <> s.member_tier 
                            OR d.name <> s.name 
                            OR d.gender <> s.gender);
@@ -324,25 +322,22 @@ def user_profile_silver(context: AssetExecutionContext):
                         s.gender, 
                         s.member_tier, 
                         s.date_of_birth, 
-                        s.upload_date AS start_date, 
+                        s.upload_date AS start_date, -- วันที่เริ่มคือวันที่อัปโหลด
                         '9999-12-31 23:59:59' AS end_date, 
                         TRUE AS is_current
                     FROM stg_userprofile s
-                    -- Left Join เพื่อหาว่า ปัจจุบันมีแถวที่ is_current = TRUE ของคนๆ นี้อยู่ไหม
                     LEFT JOIN dim_user_history d 
                       ON s.user_id = d.user_id AND d.is_current = TRUE
-                    -- ถ้า d.user_id เป็น NULL แปลว่าไม่มีแถวปัจจุบันแล้ว (พร้อมให้ Insert แถวใหม่ได้เลย)
                     WHERE d.user_id IS NULL;
                 """)
 
                 conn.commit()
-                context.log.info("✅ Incremental SCD Type 2 from Staging Completed!")
+                context.log.info("✅ Incremental SCD2: Silver records closed 1 day before Gold starts.")
                 
     except Exception as e:
         conn.rollback() 
         context.log.error(f"❌ Pipeline Failed: {e}")
         raise e
-
 
 ALERT_COOLDOWN_MINUTES = 3600
 
