@@ -324,9 +324,13 @@ def user_profile_silver(context: AssetExecutionContext):
                         CASE WHEN next_upload_date IS NULL THEN TRUE ELSE FALSE END AS is_current
                     FROM (
                         SELECT *,
-                               LEAD(upload_date) OVER (PARTITION BY user_id ORDER BY upload_date) AS next_upload_date
+                               -- PARTITION BY user_id สำคัญมาก! เพื่อแยกห้องใครห้องมัน
+                               LEAD(upload_date) OVER (PARTITION BY user_id ORDER BY upload_date) AS next_upload_date,
+                               -- ใช้ ROW_NUMBER เพื่อกำจัดแถวที่ซ้ำกันในวินาทีเดียวกัน (ถ้ามี)
+                               ROW_NUMBER() OVER (PARTITION BY user_id, member_tier ORDER BY upload_date DESC) as rn
                         FROM stg_userprofile
-                    ) ordered_stg;
+                    ) ordered_stg
+                    WHERE rn = 1; -- เอาเฉพาะสถานะล่าสุดถ้ามีการส่ง Tier เดิมซ้ำมาในวินาทีเดียวกัน
                 """)
 
                 conn.commit()
