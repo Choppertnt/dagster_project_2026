@@ -11,7 +11,7 @@ import psycopg
 import boto3
 from sensors.failure_alerts import send_line_oa_push
 # ข้อมูลการเชื่อมต่อ (แนะนำให้ใช้ Environment Variables เพื่อความปลอดภัยครับ)
-MINIO_ENDPOINT = "http://minio-api-route-thanathorn55551-dev.apps.rm2.thpm.p1.openshiftapps.com"
+MINIO_ENDPOINT = "minio-api-route-thanathorn55551-dev.apps.rm2.thpm.p1.openshiftapps.com"
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
 
@@ -33,28 +33,44 @@ CONN_STR = f"postgresql://{DB_USER}:{encoded_pass}@{DB_HOST}:5432/{DB_NAME}"
 
 embedding_model = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
 
-class ProductFileConfig(Config):
-    s3_key: str
 
 @asset
-def raw_products_from_minio(context: AssetExecutionContext, config: ProductFileConfig):
-    s3_key = config.s3_key
-    context.log.info(f"กำลังดึงไฟล์ {s3_key} จาก Bucket external-csv...")
-
-    s3 = boto3.client(
-        "s3",
-        endpoint_url=MINIO_ENDPOINT,
-        aws_access_key_id=os.getenv("MINIO_ACCESS_KEY"),
-        aws_secret_access_key=os.getenv("MINIO_SECRET_KEY"),
+def raw_products_from_minio(context: AssetExecutionContext):
+    # 1. สร้างการเชื่อมต่อกับ MinIO Client
+    context.log.info(f"กำลังเชื่อมต่อกับ MinIO ที่: {MINIO_ENDPOINT}")
+    
+    client = Minio(
+        MINIO_ENDPOINT,
+        access_key=MINIO_ACCESS_KEY,
+        secret_key=MINIO_SECRET_KEY,
+        secure=False  # OpenShift route ส่วนใหญ่เป็น HTTPS
     )
 
-    # โหลดไฟล์มาเป็น DataFrame (หรือจัดการตามความเหมาะสมของชั้น Bronze)
-    response = s3.get_object(Bucket="external-csv", Key=s3_key)
-    df = pd.read_csv(io.BytesIO(response['Body'].read()))
-    
-    context.log.info(f"โหลดข้อมูลสำเร็จ: พบ {len(df)} รายการ")
-    return df
+    bucket_name = "external-csv" # เปลี่ยนเป็นชื่อ bucket ของพี่
+    object_name = "stg_products.csv"    # เปลี่ยนเป็นชื่อไฟล์ CSV ของพี่
 
+    try:
+        # 2. ดึงข้อมูลออกมาเป็น Stream
+        context.log.info(f"กำลังดึงไฟล์ {object_name} จาก Bucket {bucket_name}...")
+        response = client.get_object(bucket_name, object_name)
+        
+        # 3. ใช้ Pandas อ่านข้อมูลจาก Stream โดยตรง
+        # เราใช้ BytesIO เพื่อแปลงข้อมูลจาก MinIO ให้ Pandas อ่านได้เหมือนไฟล์ปกติครับ
+        df = pd.read_csv(io.BytesIO(response.read()))
+        
+        context.log.info(f"ดึงข้อมูลสำเร็จ! พบข้อมูลทั้งหมด {len(df)} รายการ")
+        context.log.info(f"คอลัมน์ที่พบ: {df.columns.tolist()}")
+
+        return df
+
+    except Exception as e:
+        context.log.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {str(e)}")
+        raise e
+    finally:
+        # ปิดการเชื่อมต่อ
+        if 'response' in locals():
+            response.close()
+            response.release_conn()
 @asset
 def raw_inventory_from_minio(context: AssetExecutionContext):
     # 1. สร้างการเชื่อมต่อกับ MinIO Client
