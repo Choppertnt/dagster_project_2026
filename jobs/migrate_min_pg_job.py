@@ -1,6 +1,9 @@
 # jobs.py
 from dagster import define_asset_job, ScheduleDefinition, AssetSelection
-from assets.migrate_min_pg_asset import user_profile_silver , stock_alert_job # Import Asset เข้ามา
+from assets.migrate_min_pg_asset import user_profile_silver , stock_alert_job , raw_products_from_minio \
+    ,product_bronze , migrate_to_silver_history
+
+             # Import Asset เข้ามา
 
 # --- Define Job ---
 # สร้าง Job ชื่อ "process_scd2_job" ที่เลือกเฉพาะ asset "user_profile_silver"
@@ -29,4 +32,11 @@ alert_schedule = ScheduleDefinition(
     job=alert_job,
     cron_schedule="* * * * *", 
     execution_timezone="Asia/Bangkok"
+)
+
+
+
+product_job = define_asset_job(
+    name = "product_job",
+    selection = AssetSelection.assets(raw_products_from_minio,product_bronze,migrate_to_silver_history)
 )
