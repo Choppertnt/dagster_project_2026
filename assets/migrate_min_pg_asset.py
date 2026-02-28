@@ -202,39 +202,57 @@ def create_dim_warehouse(context: AssetExecutionContext, inventory_bronze: pd.Da
         context.log.warning("⚠️ ไม่มีข้อมูลจาก Bronze Layer")
         return pd.DataFrame()
 
-    # 1. สกัดเฉพาะ warehouse_id (ที่เป็นชื่อจริงๆ) ที่ไม่ซ้ำกัน
-    df_new_wh = df_bronze[['warehouse_id']].drop_duplicates().dropna()
+    # 1. สกัดเอาทั้ง ID และ Name มาใช้งาน (ลบแถวที่ ID ซ้ำกันออก)
+    df_new_wh = df_bronze[['warehouse_id', 'warehouse_name']].drop_duplicates().dropna(subset=['warehouse_id'])
     
     try:
         with psycopg.connect(CONN_STR) as conn:
             with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
                 
-                # 2. ดึงเฉพาะ warehouse_id ที่มีอยู่แล้วในระบบมา
-                cur.execute("SELECT warehouse_id FROM public.dim_warehouses WHERE is_current = True")
-                existing_wids = [row['warehouse_id'] for row in cur.fetchall()]
+                # 2. ดึงข้อมูล "ปัจจุบัน" ใน Dim มาเทียบ
+                cur.execute("SELECT warehouse_id, warehouse_name FROM public.dim_warehouses WHERE is_current = True")
+                df_current = pd.DataFrame(cur.fetchall())
 
-                # 3. คัดกรองเอาเฉพาะ "คลังสินค้าชื่อใหม่" ที่ยังไม่เคยมีในระบบ
-                df_to_insert = df_new_wh[~df_new_wh['warehouse_id'].isin(existing_wids)]
+                # 3. 🧠 ตรวจหาการเปลี่ยนแปลง (SCD Type 2 Logic)
+                if not df_current.empty:
+                    # เอาข้อมูลใหม่เทียบข้อมูลเก่าผ่าน warehouse_id
+                    merged = df_new_wh.merge(df_current, on='warehouse_id', how='left', suffixes=('', '_old'))
+                    
+                    # หาแถวที่: (เป็นคลังสินค้าใหม่เลย) OR (คลังสินค้าเดิมแต่ชื่อเปลี่ยนไป)
+                    changes_mask = (
+                        merged['warehouse_name_old'].isna() | 
+                        (merged['warehouse_name'] != merged['warehouse_name_old'])
+                    )
+                    df_to_process = merged[changes_mask].copy()
+                else:
+                    # ถ้าระบบเพิ่งรันครั้งแรก (ตารางว่างเปล่า) ก็เอาทั้งหมดเลย
+                    df_to_process = df_new_wh.copy()
 
-                if df_to_insert.empty:
-                    context.log.info("✨ ข้อมูล Warehouse ไม่มีชื่อใหม่เข้ามา ไม่ต้องอัปเดต")
+                if df_to_process.empty:
+                    context.log.info("✨ ข้อมูล Warehouse ไม่มีใหม่และไม่มีเปลี่ยนชื่อ ไม่ต้องอัปเดต")
                     return df_new_wh
 
-                # 4. เตรียมข้อมูลเพื่อ Insert
-                new_records = [(row['warehouse_id'], now) for _, row in df_to_insert.iterrows()]
+                # 4. เตรียมข้อมูลเพื่อ Update/Insert
+                target_wids = df_to_process['warehouse_id'].unique().tolist()
+                new_records = [(row['warehouse_id'], row['warehouse_name'], now) for _, row in df_to_process.iterrows()]
 
-                # 5. เพิ่มประวัติใหม่ลงระบบ (Postgres จะรัน warehouse_id_pk ให้เองอัตโนมัติ)
-                # เราใส่โครงสร้าง SCD2 (start, end, is_current) ไว้ให้ครบตามมาตรฐาน
+                # A. 🚫 ปิดประวัติเดิม: ถ้าเป็น ID เดิมที่เปลี่ยนชื่อ ให้ set is_current = False
+                cur.execute(
+                    "UPDATE public.dim_warehouses SET is_current = False, end_date = %s WHERE warehouse_id = ANY(%s) AND is_current = True",
+                    (now, target_wids)
+                )
+
+                # B. ✨ เพิ่มประวัติใหม่ (รวมถึงคลังใหม่แกะกล่องด้วย)
                 cur.executemany(
                     """
-                    INSERT INTO public.dim_warehouses (warehouse_id, start_date, end_date, is_current)
-                    VALUES (%s, %s, '9999-12-31 23:59:59', True)
+                    INSERT INTO public.dim_warehouses (warehouse_id, warehouse_name, start_date, end_date, is_current)
+                    VALUES (%s, %s, %s, '9999-12-31 23:59:59', True)
                     """,
                     new_records
                 )
                 
                 conn.commit()
-                context.log.info(f"✅ บันทึก Warehouse ใหม่สำเร็จ {len(new_records)} รายการ")
+                context.log.info(f"✅ อัปเดต Warehouse สำเร็จ {len(new_records)} รายการ (พบรายการใหม่/เปลี่ยนชื่อ)")
 
     except Exception as e:
         context.log.error(f"❌ Error: {str(e)}")
