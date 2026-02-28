@@ -165,7 +165,8 @@ def inventory_bronze(context: AssetExecutionContext , raw_inventory_from_minio):
     
     # 2. สร้างคำสั่ง SQL Upsert (ON CONFLICT)
     # สมมติว่าต้องการให้ถ้าซ้ำแล้วทำการ Update ข้อมูลเดิม (เหมือน upsert ของ Supabase)
-    update_statement = ", ".join([f"{col} = EXCLUDED.{col}" for col in df.columns if col not in ['product_id', 'update_at']])
+    
+    update_statement = ", ".join([f"{col} = EXCLUDED.{col}" for col in df.columns if col not in ['product_id', 'update_at','warehouse_id']])
     
     query = f"""
         INSERT INTO stg_inventory ({columns})
