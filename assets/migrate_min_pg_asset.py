@@ -287,59 +287,61 @@ def migrate_to_silver_history(context: AssetExecutionContext, migrate_to_bronze_
 
 
 @asset()
-def user_profile_silver(context: AssetExecutionContext ):
+def user_profile_silver(context: AssetExecutionContext):
     try:
         with psycopg.connect(CONN_STR) as conn:
-            with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
-                # 1. ดึงข้อมูล Active ปัจจุบันจาก Postgres มาเปรียบเทียบ
-                cur.execute("TRUNCATE TABLE dim_user_history RESTART IDENTITY;")
-
-                cur.execute('''    
-                INSERT INTO dim_user_history (user_id, name, gender, member_tier,date_of_birth, start_date, end_date, is_current)
-
-
-                WITH ordered_events AS (
-                    SELECT 
-                        user_id,
-                        name,
-                        gender,
-                        member_tier,
-                        date_of_birth,
-                        upload_date AS start_date, -- เวลาที่เกิดเหตุการณ์ คือเวลาเริ่ม
-                        
-                        -- ฟังก์ชัน LEAD จะไปดึง upload_date ของแถวถัดไปมาให้
-                        LEAD(upload_date) OVER (PARTITION BY user_id ORDER BY upload_date) AS next_event_date
-                    FROM 
-                        stg_userprofile
-                )
-
-                SELECT
-                    user_id,
-                    name,
-                    gender,
-                    member_tier,
-                    date_of_birth,
-                    start_date,
-                    -- ถ้ามีเหตุการณ์ถัดไป ให้ใช้เวลานั้นเป็น end_date
-                    -- ถ้าไม่มี (เป็นแถวล่าสุด) ให้ end_date เป็น NULL
-                    next_event_date AS end_date,
-                    -- ถ้า end_date เป็น NULL แสดงว่าเป็นปัจจุบัน (is_current = TRUE)
-                    CASE 
-                        WHEN next_event_date IS NULL THEN TRUE 
-                        ELSE FALSE 
-                    END AS is_current
-                FROM 
-                    ordered_events;''')
+            with conn.cursor() as cur:
                 
+                # ---------------------------------------------------------
+                # Step 1: ปิดประวัติเก่า (UPDATE)
+                # มองหาคนใน stg_userprofile ที่มีประวัติเดิมอยู่ใน dim_user_history
+                # แล้วทำการปิด end_date ด้วยเวลา upload_date จาก staging
+                # ---------------------------------------------------------
+                cur.execute("""
+                    UPDATE dim_user_history d
+                    SET end_date = s.upload_date, 
+                        is_current = FALSE
+                    FROM stg_userprofile s
+                    WHERE d.user_id = s.user_id 
+                      AND d.is_current = TRUE
+                      -- เช็คเฉพาะคนที่มีการเปลี่ยนแปลงจริงๆ (ถ้าข้อมูลเหมือนเดิมเป๊ะก็ไม่ต้องทำอะไร)
+                      AND (d.member_tier <> s.member_tier 
+                           OR d.name <> s.name 
+                           OR d.gender <> s.gender);
+                """)
+
+                # ---------------------------------------------------------
+                # Step 2: สร้างประวัติใหม่ (INSERT)
+                # ดึงข้อมูลจาก stg_userprofile ไปใส่เป็นแถวใหม่
+                # (ครอบคลุมทั้ง "ลูกค้าใหม่เอี่ยม" และ "ลูกค้าเก่าที่เพิ่งถูกปิดประวัติไปใน Step 1")
+                # ---------------------------------------------------------
+                cur.execute("""
+                    INSERT INTO dim_user_history 
+                    (user_id, name, gender, member_tier, date_of_birth, start_date, end_date, is_current)
+                    SELECT 
+                        s.user_id, 
+                        s.name, 
+                        s.gender, 
+                        s.member_tier, 
+                        s.date_of_birth, 
+                        s.upload_date AS start_date, 
+                        '9999-12-31 23:59:59' AS end_date, 
+                        TRUE AS is_current
+                    FROM stg_userprofile s
+                    -- Left Join เพื่อหาว่า ปัจจุบันมีแถวที่ is_current = TRUE ของคนๆ นี้อยู่ไหม
+                    LEFT JOIN dim_user_history d 
+                      ON s.user_id = d.user_id AND d.is_current = TRUE
+                    -- ถ้า d.user_id เป็น NULL แปลว่าไม่มีแถวปัจจุบันแล้ว (พร้อมให้ Insert แถวใหม่ได้เลย)
+                    WHERE d.user_id IS NULL;
+                """)
+
                 conn.commit()
-                context.log.info("✅ Rebuilt Silver Table (SCD Type 2) Successfully")
+                context.log.info("✅ Incremental SCD Type 2 from Staging Completed!")
+                
     except Exception as e:
-        # 🚨 แจ้งเตือนตรงนี้ครับ!
-        error_msg = f"☠️ PIPELINE DIED!\nAsset: user_profile_silver\nError: {str(e)}"
+        conn.rollback() 
         context.log.error(f"❌ Pipeline Failed: {e}")
-        raise e # สำคัญมาก! ต้อง raise เพื่อให้ Dagster รู้ว่า Job นี้ Failed
-
-
+        raise e
 
 
 ALERT_COOLDOWN_MINUTES = 3600
