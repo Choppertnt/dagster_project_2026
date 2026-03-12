@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dagster-ingress
+  namespace: dagster
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod # ถ้ามี SSL
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: dagster.thanathorn-chopper.com 
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: dagster-release-dagster-webserver # เช็คชื่อด้วย kubectl get svc -n dagster
+            port:
+              number: 8080

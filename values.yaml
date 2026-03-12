@@ -1,46 +1,34 @@
 generatePostgresqlPasswordSecret: false
 global:
+  imagePullSecrets:
+    - name: ghcr-auth
   postgresqlSecretName: "db-dagster"
   dagsterHome: "/opt/dagster/dagster_home"
-  celeryConfigSecretName: "dagster-celery-config-secret"
-
 dagsterWebserver:
   replicaCount: 1
   image:
-    repository: "docker.io/dagster/dagster-celery-k8s"
-    tag: ~
+    repository: "dagster/dagster-k8s" 
+    tag: "1.9.10" 
     pullPolicy: Always
-  
-  checkDbReadyInitContainer: false
-  
-  # ❌ ลบ securityContext ออกให้หมด (ถ้ามี)
-  securityContext: {}
 
   service:
-      type: ClusterIP
-      port: 8080  # 👈 เปลี่ยนจาก 80 เป็น 8080
-      annotations: {}
-
-
-# 2. ✅ แก้ Probe ที่ใช้เช็คสถานะ ให้เช็คที่ 8080 ด้วย
+    type: ClusterIP
+    port: 8080 
+    annotations: {}
   readinessProbe:
+      httpGet:
+        path: "/server_info"
+        port: 8080    # 👈 เปลี่ยนจาก 80 เป็น 8080 ให้ตรงกับแอป
+      periodSeconds: 20
+  livenessProbe:
     httpGet:
       path: "/server_info"
-      port: 8080  # 👈 เปลี่ยนจาก 80 เป็น 8080
+      port: 8080    # 👈 เปลี่ยนตรงนี้ด้วย
+    initialDelaySeconds: 60
     periodSeconds: 20
-    timeoutSeconds: 10
-    successThreshold: 1
-    failureThreshold: 3
-
   env:
-    - name: DAGSTER_WEBSERVER_PORT
-      value: "8080"  # 👈 เพิ่มบรรทัดนี้ครับ สั่งให้แอปเปิดที่ 8080
-    - name: DAGSTER_TELEMETRY_ENABLED
-      value: "false"
-    - name: HOME
-      value: "/opt/dagster/dagster_home"
     - name: DAGSTER_PG_HOST
-      value: "internal-postgres-postgresql"
+      value: "internal-postgres-postgresql.postgresql.svc.cluster.local" 
     - name: DAGSTER_PG_USER
       value: "dagster_user"
     - name: DAGSTER_PG_DB
@@ -50,16 +38,9 @@ dagsterWebserver:
         secretKeyRef: 
           name: "db-dagster"
           key: "postgresql-password"
-  envSecrets:
-    - name: db-dagster
-    - name: db-credentials
-
-  # ✅ เพิ่ม: สร้างพื้นที่ชั่วคราวให้เขียนไฟล์ได้
   volumes:
     - name: dagster-home-vol
       emptyDir: {}
-  
-  # ✅ เพิ่ม: Mount ทับลงไปเลย Permission จะผ่านทันที
   volumeMounts:
     - name: dagster-home-vol
       mountPath: "/opt/dagster/dagster_home"
@@ -67,17 +48,13 @@ dagsterWebserver:
 dagsterDaemon:
   enabled: true
   image:
-    repository: "docker.io/dagster/dagster-celery-k8s"
-    tag: ~
+    repository: "dagster/dagster-k8s" 
+    tag: "1.9.10"
     pullPolicy: Always
 
-  securityContext: {}
-
   env:
-    - name: HOME
-      value: "/opt/dagster/dagster_home"
     - name: DAGSTER_PG_HOST
-      value: "internal-postgres-postgresql"
+      value: "internal-postgres-postgresql.postgresql.svc.cluster.local"
     - name: DAGSTER_PG_USER
       value: "dagster_user"
     - name: DAGSTER_PG_DB
@@ -87,11 +64,8 @@ dagsterDaemon:
         secretKeyRef:
           name: "db-dagster"
           key: "postgresql-password"
-  envSecrets:
-    - name: db-dagster
-    - name: db-credentials
-
-  # ✅ เพิ่มให้ Daemon ด้วย
+  securityContext: {}
+  
   volumes:
     - name: dagster-home-vol
       emptyDir: {}
@@ -104,46 +78,21 @@ dagster-user-deployments:
   deployments:
     - name: "my-data-pipeline"
       image:
-        repository: "image-registry.openshift-image-registry.svc:5000/thanathorn55551-dev/dagster-assets"
+        repository: "ghcr.io/choppertnt/dagster-assets" 
         tag: "latest"
         pullPolicy: Always
       
-      securityContext: {}
+      imagePullSecrets:
+        - name: ghcr-auth
 
       dagsterApiGrpcArgs:
         - "--python-file"
         - "repo.py"
       port: 3030
       
-      # ✅ เพิ่ม Env ตรงนี้ครับ (เปลี่ยนที่เก็บ Cache มาลงที่ที่เขียนได้)
       env:
         - name: HOME
           value: "/opt/dagster/dagster_home"
-        - name: HF_HOME
-          value: "/opt/dagster/dagster_home/huggingface"
-        - name: TRANSFORMERS_CACHE
-          value: "/opt/dagster/dagster_home/huggingface"
-
-      envSecrets:
-        - name: db-dagster
-        - name: db-credentials
-
-      volumes:
-        - name: dagster-home-vol
-          emptyDir: {}
-      volumeMounts:
-        - name: dagster-home-vol
-          mountPath: "/opt/dagster/dagster_home"
-
-postgresql:
-  enabled: false
-  postgresqlHost: "internal-postgres-postgresql"
-  postgresqlUsername: "dagster_user"
-  postgresqlDatabase: "dagster_metadata"
-  service:
-    port: 5432
-
-
 
 runLauncher:
   type: K8sRunLauncher
@@ -152,3 +101,11 @@ runLauncher:
       imagePullPolicy: "Always"
       envSecrets:
         - name: db-dagster
+
+
+
+postgresql:
+  enabled: false 
+  postgresqlHost: "internal-postgres-postgresql.postgresql.svc.cluster.local"
+  postgresqlUsername: "dagster_user"
+  postgresqlDatabase: "dagster_metadata"

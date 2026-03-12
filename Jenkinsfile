@@ -2,45 +2,61 @@ pipeline {
     agent any
 
     environment {
-        NAMESPACE = "thanathorn55551-dev"
-        APP_NAME = "dagster-assets"
-        DEPLOYMENT_NAME = "dagster-release-dagster-user-deployments-my-data-pipeline"
+        NAMESPACE = "dagster" 
+        // 🎯 แก้ชื่อ Deployment ให้ตรงตามที่ kubectl get deploy เห็น
+        DEPLOYMENT_NAME = "dagster-release-dagster-user-deployments-my-data-pipeline" 
         
+        REGISTRY = "ghcr.io"
+        GH_USER = "Choppertnt"
+        IMAGE_NAME = "ghcr.io/choppertnt/dagster-assets"
+        // 🎯 ใช้ Build Number ต่อท้ายเพื่อความเท่และไม่ซ้ำ
         IMAGE_TAG = "v1.0.${env.BUILD_NUMBER}"
+        
+        GH_CREDENTIALS_ID = "ghcr-auth" 
     }
 
     stages {
-        stage('1. Build Image on OpenShift') {
+        stage('1. Build and Tag') {
             steps {
-                script {
-                    echo "เริ่ม Build Image ด้วย Tag: ${IMAGE_TAG}..."
-                    sh "oc start-build ${APP_NAME} --from-dir=. --follow -n ${NAMESPACE}"
-                    sh "oc tag ${APP_NAME}:latest ${APP_NAME}:${IMAGE_TAG} -n ${NAMESPACE}"
+                sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+                sh "docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest"
+            }
+        }
+
+        stage('2. Push to GHCR') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: env.GH_CREDENTIALS_ID, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                    sh "echo ${PASS} | docker login ${REGISTRY} -u ${USER} --password-stdin"
+                    sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
+                    sh "docker push ${IMAGE_NAME}:latest"
                 }
             }
         }
 
-        stage('2. Deploy (Rolling Update)') {
+        stage('3. Deploy via Helm') {
             steps {
                 script {
-                    echo "อัปเดต Dagster Deployment ไปใช้เวอร์ชัน ${IMAGE_TAG}..."
-                    
-                    def FULL_IMAGE_URL = "image-registry.openshift-image-registry.svc:5000/${NAMESPACE}/${APP_NAME}:${IMAGE_TAG}"
-                    
-                    // 🎯 จุดที่อัปเกรด: สั่งเปลี่ยนทั้ง Image และตัวแปร DAGSTER_CURRENT_IMAGE
+                    echo "Deploying version ${IMAGE_TAG} to K3s..."
+                    // 🎯 ใช้ helm upgrade --set เพื่อความยั่งยืน
+                    // หมายเหตุ: เช็คโครงสร้าง path ของ tag ใน values.yaml ของนายให้ดี
                     sh """
-                        # 1. เปลี่ยน Image ของ Container
-                        oc set image deployment/${DEPLOYMENT_NAME} \
-                        dagster-user-deployments=${FULL_IMAGE_URL} \
-                        -n ${NAMESPACE}
-                        
-                        # 2. เปลี่ยนชื่อในตัวแปรที่หน้าเว็บ Dagster ใช้แสดงผล
-                        oc set env deployment/${DEPLOYMENT_NAME} \
-                        DAGSTER_CURRENT_IMAGE=${FULL_IMAGE_URL} \
-                        -n ${NAMESPACE}
+                    helm upgrade --install dagster-release dagster/dagster \
+                      -n ${NAMESPACE} \
+                      -f values.yaml \
+                      --set dagster-user-deployments.deployments[0].image.tag=${IMAGE_TAG}
                     """
+                    sh "kubectl rollout status deployment/${DEPLOYMENT_NAME} -n ${NAMESPACE}"
                 }
             }
+        }
+    }
+
+    post {
+        success {
+            echo "Successfully deployed ${IMAGE_TAG}!"
+        }
+        always {
+            sh "docker image prune -f"
         }
     }
 }
