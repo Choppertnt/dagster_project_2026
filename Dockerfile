@@ -27,3 +27,5 @@ RUN mkdir -p $DAGSTER_HOME && \
     chmod -R g+rwX /opt/dagster
 
 EXPOSE 3000
+
+CMD ["dagster-webserver", "-h", "0.0.0.0", "-p", "3000"]
