@@ -2,28 +2,28 @@ pipeline {
     agent {
         kubernetes {
             yaml """
-        apiVersion: v1
-        kind: Pod
-        spec:
-        containers:
-        - name: docker-cli
-            image: docker:cli
-            command: ['cat']
-            tty: true
-            volumeMounts:
-            - name: docker-sock
-            mountPath: /var/run/docker.sock
-            resources:
-            requests:
-                cpu: "100m"
-                memory: "256Mi"
-            limits:
-                cpu: "500m"
-                memory: "1024Mi"
-        volumes:
-        - name: docker-sock
-            hostPath:
-            path: /var/run/docker.sock
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: docker-cli
+    image: docker:cli
+    command: ['cat']
+    tty: true
+    volumeMounts:
+    - name: docker-sock
+      mountPath: /var/run/docker.sock
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+      limits:
+        cpu: "500m"
+        memory: "1024Mi"
+  volumes:
+  - name: docker-sock
+    hostPath:
+      path: /var/run/docker.sock
         """
         }
     }
