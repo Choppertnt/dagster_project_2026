@@ -76,6 +76,8 @@ spec:
                     // 🎯 ใช้ helm upgrade --set เพื่อความยั่งยืน
                     // หมายเหตุ: เช็คโครงสร้าง path ของ tag ใน values.yaml ของนายให้ดี
                     sh """
+                    helm repo add dagster https://dagster-io.github.io/helm
+                    helm repo update
                     helm upgrade --install dagster-release dagster/dagster \
                       -n ${NAMESPACE} \
                       -f values.yaml \
