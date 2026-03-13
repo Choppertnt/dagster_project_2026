@@ -20,6 +20,10 @@ spec:
       limits:
         cpu: "500m"
         memory: "1024Mi"
+  - name: helm-kubectl
+    image: alpine/helm:3.12.0 
+    command: ['cat']
+    tty: true
   volumes:
   - name: docker-sock
     hostPath:
@@ -66,6 +70,7 @@ spec:
 
         stage('3. Deploy via Helm') {
             steps {
+                container('helm-kubectl') {
                 script {
                     echo "Deploying version ${IMAGE_TAG} to K3s..."
                     // 🎯 ใช้ helm upgrade --set เพื่อความยั่งยืน
@@ -78,6 +83,7 @@ spec:
                     """
                     sh "kubectl rollout status deployment/${DEPLOYMENT_NAME} -n ${NAMESPACE}"
                 }
+            }
             }
         }
     }
