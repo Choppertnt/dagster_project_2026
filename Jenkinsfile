@@ -21,7 +21,7 @@ spec:
         cpu: "500m"
         memory: "1024Mi"
   - name: helm-kubectl
-    image: alpine/helm:3.12.0 
+    image: dtzar/helm-kubectl:3.12.0
     command: ['cat']
     tty: true
   volumes:
