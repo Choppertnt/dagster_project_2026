@@ -38,6 +38,16 @@ dagsterWebserver:
         secretKeyRef: 
           name: "db-dagster"
           key: "postgresql-password"
+    - name: MINIO_ACCESS_KEY
+      valueFrom: 
+        secretKeyRef:
+          name: "db-dagster"
+          key: "MINIO_ACCESS_KEY"
+    - name: MINIO_SECRET_KEY
+      valueFrom: 
+        secretKeyRef:
+          name: "db-dagster"
+          key: "MINIO_SECRET_KEY"
   volumes:
     - name: dagster-home-vol
       emptyDir: {}
@@ -59,6 +69,16 @@ dagsterDaemon:
       value: "dagster_user"
     - name: DAGSTER_PG_DB
       value: "dagster_metadata"
+    - name: MINIO_ACCESS_KEY
+      valueFrom: 
+        secretKeyRef:
+          name: "db-dagster"
+          key: "MINIO_ACCESS_KEY"
+    - name: MINIO_SECRET_KEY
+      valueFrom: 
+        secretKeyRef:
+          name: "db-dagster"
+          key: "MINIO_SECRET_KEY"
     - name: DAGSTER_PG_PASSWORD
       valueFrom:
         secretKeyRef:
@@ -102,7 +122,18 @@ runLauncher:
       envSecrets:
         - name: db-dagster
 
-
+computeLogs:
+  enabled: true
+  type: S3ComputeLogManager
+  config:
+    s3ComputeLogManager:
+      bucket: "dagster-logs" 
+      endpointUrl: "http://minio-service.minio.svc.cluster.local:9000" # 👈 URL ของ MinIO ใน K3s
+      region: "us-east-1" 
+      accessKey:
+        env: MINIO_ACCESS_KEY
+      secretKey:
+        env: MINIO_SECRET_KEY
 
 postgresql:
   enabled: false 

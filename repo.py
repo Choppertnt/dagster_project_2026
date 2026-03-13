@@ -4,12 +4,34 @@ from jobs.migrate_min_pg_job import scd2_job , scd2_schedule , alert_job , alert
 from sensors.failure_alerts import line_oa_failure_sensor 
 from sensors.new_user import stg_userprofile_sensor
 from sensors.product_sensors import minio_product_csv_sensor
+from dagster_aws.s3 import s3_pickle_io_manager, s3_resource
+import os
+
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
+minio_io_manager = s3_pickle_io_manager.configured({
+    "s3_bucket": "dagster-assets",    # นายต้องสร้าง Bucket นี้ใน MinIO ก่อนนะ
+    "s3_prefix": "prod",
+})
+
+# 2. นิยาม S3 Resource เพื่อต่อท่อ
+minio_resource = s3_resource.configured({
+    "endpoint_url": "http://minio-service.minio.svc.cluster.local:9000", 
+    "access_key": MINIO_ACCESS_KEY,
+    "secret_key": MINIO_SECRET_KEY,
+    "use_ssl": False,
+})
+
 
 all_assets = load_assets_from_modules([migrate_min_pg_asset])
 
 defs = Definitions(
     assets=all_assets,
     jobs=[scd2_job,alert_job,product_job],
+    resources={
+            "io_manager": minio_io_manager,
+            "s3": minio_resource,
+        },
     schedules = [scd2_schedule,alert_schedule],
     sensors=[line_oa_failure_sensor , stg_userprofile_sensor,minio_product_csv_sensor]
 ) 
