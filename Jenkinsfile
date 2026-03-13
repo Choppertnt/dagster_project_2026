@@ -1,5 +1,32 @@
 pipeline {
-    agent any
+    agent {
+        kubernetes {
+            yaml """
+        apiVersion: v1
+        kind: Pod
+        spec:
+        containers:
+        - name: docker-cli
+            image: docker:cli
+            command: ['cat']
+            tty: true
+            volumeMounts:
+            - name: docker-sock
+            mountPath: /var/run/docker.sock
+            resources:
+            requests:
+                cpu: "100m"
+                memory: "256Mi"
+            limits:
+                cpu: "500m"
+                memory: "1024Mi"
+        volumes:
+        - name: docker-sock
+            hostPath:
+            path: /var/run/docker.sock
+        """
+        }
+    }
 
     environment {
         NAMESPACE = "dagster" 
@@ -56,7 +83,10 @@ pipeline {
             echo "Successfully deployed ${IMAGE_TAG}!"
         }
         always {
-            sh "docker image prune -f"
+            container('docker-cli') {
+                echo "Cleaning up dangling images..."
+                sh "docker image prune -f"
+            }
         }
     }
 }
