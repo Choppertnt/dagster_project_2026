@@ -45,17 +45,21 @@ spec:
     stages {
         stage('1. Build and Tag') {
             steps {
+            container('docker-cli') {
                 sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
                 sh "docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest"
             }
         }
+        }
 
         stage('2. Push to GHCR') {
             steps {
+                container('docker-cli') {
                 withCredentials([usernamePassword(credentialsId: env.GH_CREDENTIALS_ID, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                     sh "echo ${PASS} | docker login ${REGISTRY} -u ${USER} --password-stdin"
                     sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
                     sh "docker push ${IMAGE_NAME}:latest"
+                }
                 }
             }
         }
