@@ -150,6 +150,6 @@ computeLogs:
 postgresql:
   enabled: false 
   postgresqlHost: "internal-postgres-postgresql.postgresql.svc.cluster.local"
-  postgresqlUsername: "postgres" 
+  postgresqlUsername: "dagster_user" 
   postgresqlDatabase: "postgres"
   postgresqlPort: 30432
