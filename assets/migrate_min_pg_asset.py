@@ -343,7 +343,7 @@ def migrate_to_silver_history(context: AssetExecutionContext, product_bronze):
                     text("""
                         INSERT INTO dim_products_history 
                         (product_id, product_name, category, brand, base_price, start_date, end_date, is_current, product_vector)
-                        VALUES (:pid, :name, :cat, :brand, :price, :start, :end, :curr, :vec::vector)
+                        VALUES (:pid, :name, :cat, :brand, :price, :start, :end, :curr, CAST(:vec AS vector))
                     """),
                     new_records_to_insert
                 )
