@@ -61,6 +61,8 @@ dagsterDaemon:
     repository: "dagster/dagster-k8s" 
     tag: "1.9.10"
     pullPolicy: Always
+  envSecrets:
+    - name: "db-dagster"
 
   env:
     - name: DAGSTER_PG_HOST
@@ -92,6 +94,7 @@ dagsterDaemon:
   volumeMounts:
     - name: dagster-home-vol
       mountPath: "/opt/dagster/dagster_home"
+  
 
 dagster-user-deployments:
   enabled: true
