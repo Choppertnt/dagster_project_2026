@@ -262,14 +262,12 @@ def create_dim_warehouse(context: AssetExecutionContext, inventory_bronze: pd.Da
         
     return df_new_wh
 
-from sqlalchemy import create_engine, text
 
 @asset(deps=['product_bronze'])
 def migrate_to_silver_history(context: AssetExecutionContext, product_bronze):
     """
     ขั้นตอน Silver: ทำ Vector Search และเก็บประวัติแบบ SCD Type 2 ลง PostgreSQL
     """
-    ENGINE = create_engine(CONN_STR)
     df_bronze = product_bronze
     now = datetime.utcnow()
 
@@ -278,78 +276,75 @@ def migrate_to_silver_history(context: AssetExecutionContext, product_bronze):
         return pd.DataFrame()
 
     new_records_to_insert = []
+
     try:
-        # ENGINE.begin() จะจัดการเปิด Transaction และ COMMIT ให้เองตอนจบ block
-        # ถ้าพังกลางทาง มันจะ ROLLBACK ให้ทันทีครับ
-        with ENGINE.begin() as conn:
-            
-            # 1. ดึงข้อมูล Active ปัจจุบันจาก Postgres มาเปรียบเทียบ
-            # Pandas สามารถอ่านจาก SQLAlchemy Connection ได้โดยตรงเลยครับ
-            df_current = pd.read_sql("SELECT * FROM dim_products_history WHERE is_current = True", conn)
+        with psycopg.connect(CONN_STR) as conn:
+            with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+                # 1. ดึงข้อมูล Active ปัจจุบันจาก Postgres มาเปรียบเทียบ
+                cur.execute("SELECT * FROM dim_products_history WHERE is_current = True")
+                current_silver_data = cur.fetchall()
+                df_current = pd.DataFrame(current_silver_data)
 
-            for _, row in df_bronze.iterrows():
-                pid = str(row['product_id'])
-                
-                # ตรวจสอบว่ามีสินค้านี้ในระบบหรือยัง
-                match = df_current[df_current['product_id'] == pid] if not df_current.empty else pd.DataFrame()
-                
-                has_changed = False
-                if not match.empty:
-                    current_row = match.iloc[0]
-                    # เช็คการเปลี่ยนแปลง (ราคา หรือ ชื่อ)
-                    if (float(row['base_price']) != float(current_row['base_price']) or 
-                        str(row['product_name']) != str(current_row['product_name'])):
-                        has_changed = True
-                        
-                        # A. สั่งปิด Record เก่า (Expire) โดยใช้ text() ส่ง parameter
-                        context.log.info(f"สินค้า {pid} เปลี่ยนข้อมูล -> กำลัง Expire Record เก่า")
-                        conn.execute(
-                            text("""
+                for _, row in df_bronze.iterrows():
+                    pid = str(row['product_id'])
+                    
+                    # ตรวจสอบว่ามีสินค้านี้ในระบบหรือยัง
+                    match = df_current[df_current['product_id'] == pid] if not df_current.empty else pd.DataFrame()
+                    
+                    has_changed = False
+                    if not match.empty:
+                        current_row = match.iloc[0]
+                        # เช็คการเปลี่ยนแปลง (ราคา หรือ ชื่อ)
+                        if (float(row['base_price']) != float(current_row['base_price']) or 
+                            str(row['product_name']) != str(current_row['product_name'])):
+                            has_changed = True
+                            
+                            # A. สั่งปิด Record เก่า (Expire)
+                            context.log.info(f"สินค้า {pid} เปลี่ยนข้อมูล -> กำลัง Expire Record เก่า")
+                            cur.execute(
+                                """
                                 UPDATE dim_products_history 
-                                SET is_current = False, end_date = :now 
-                                WHERE product_id = :pid AND is_current = True
-                            """),
-                            {"now": now, "pid": pid}
-                        )
+                                SET is_current = False, end_date = %s 
+                                WHERE product_id = %s AND is_current = True
+                                """,
+                                (now, pid)
+                            )
 
-                # กรณีเป็นสินค้าใหม่ หรือ สินค้าเดิมที่ข้อมูลเปลี่ยน
-                if match.empty or has_changed:
-                    context.log.info(f"กำลังทำ Embedding สำหรับ: {row['product_name']}")
-                    
-                    # B. สร้าง Vector ด้วย FastEmbed
-                    rich_description = f"Brand: {row['brand']} | Category: {row['category']} | Product: {row['product_name']}"
-                    embeddings = list(embedding_model.embed([rich_description]))
-                    
-                    # แปลงเป็น String แบบ list เพื่อให้ SQLAlchemy โยนเข้า Postgres ได้ปลอดภัยที่สุด
-                    product_vector = str(embeddings[0].tolist())
-                    
-                    # C. เตรียมข้อมูลสำหรับ Insert ใหม่ (ใช้ Dictionary สำหรับ SQLAlchemy)
-                    new_records_to_insert.append({
-                        "pid": pid,
-                        "name": row['product_name'],
-                        "cat": row['category'],
-                        "brand": row['brand'],
-                        "price": int(row['base_price']),
-                        "start": now,
-                        "end": None,
-                        "curr": True,
-                        "vec": product_vector 
-                    })
+                    # กรณีเป็นสินค้าใหม่ หรือ สินค้าเดิมที่ข้อมูลเปลี่ยน
+                    if match.empty or has_changed:
+                        context.log.info(f"กำลังทำ Embedding สำหรับ: {row['product_name']}")
+                        
+                        # B. สร้าง Vector ด้วย FastEmbed
+                        search_keywords = f"{row['brand']} {row['category']} {row['product_name']}".lower()
+                        context.log.info(f"เตรียมข้อมูลค้นหาสำหรับ: {search_keywords}")
+                        
+                        # C. เตรียมข้อมูลสำหรับ Insert ใหม่ (ใช้ Tuple เพื่อส่งเข้า Postgres)
+                        new_records_to_insert.append((
+                            pid,
+                            row['product_name'],
+                            row['category'],
+                            row['brand'],
+                            int(row['base_price']),
+                            now,
+                            None,
+                            True,
+                            search_keywords  # psycopg จะแปลง list เป็น vector format ให้เอง
+                        ))
 
-            # 2. บันทึกข้อมูลใหม่ทั้งหมดลง Silver Table (Batch Insert)
-            if new_records_to_insert:
-                # สังเกตตรง :vec::vector นะครับ เป็นการบังคับ Cast type ให้ Postgres เข้าใจชัวร์ๆ
-                conn.execute(
-                    text("""
+                # 2. บันทึกข้อมูลใหม่ทั้งหมดลง Silver Table (Batch Insert)
+                if new_records_to_insert:
+                    cur.executemany(
+                        """
                         INSERT INTO dim_products_history 
-                        (product_id, product_name, category, brand, base_price, start_date, end_date, is_current, product_vector)
-                        VALUES (:pid, :name, :cat, :brand, :price, :start, :end, :curr, CAST(:vec AS vector))
-                    """),
-                    new_records_to_insert
-                )
-                context.log.info(f"✅ SQLAlchemy: บันทึกข้อมูลลง Silver สำเร็จ {len(new_records_to_insert)} รายการ")
-            else:
-                context.log.info("ไม่มีการเปลี่ยนแปลงข้อมูล ไม่ต้องอัปเดต Silver")
+                        (product_id, product_name, category, brand, base_price, start_date, end_date, is_current, search_keywords)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        new_records_to_insert
+                    )
+                    conn.commit()
+                    context.log.info(f"✅ บันทึกข้อมูลลง Silver สำเร็จ {len(new_records_to_insert)} รายการ")
+                else:
+                    context.log.info("ไม่มีการเปลี่ยนแปลงข้อมูล ไม่ต้องอัปเดต Silver")
 
     except Exception as e:
         context.log.error(f"❌ เกิดข้อผิดพลาดในขั้นตอน Silver: {str(e)}")
@@ -360,86 +355,6 @@ def migrate_to_silver_history(context: AssetExecutionContext, product_bronze):
         "product_id", "product_name", "category", "brand", "base_price", 
         "start_date", "end_date", "is_current", "product_vector"
     ])
-
-    # try:
-    #     with psycopg.connect(CONN_STR) as conn:
-    #         with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
-    #             # 1. ดึงข้อมูล Active ปัจจุบันจาก Postgres มาเปรียบเทียบ
-    #             cur.execute("SELECT * FROM dim_products_history WHERE is_current = True")
-    #             current_silver_data = cur.fetchall()
-    #             df_current = pd.DataFrame(current_silver_data)
-
-    #             for _, row in df_bronze.iterrows():
-    #                 pid = str(row['product_id'])
-                    
-    #                 # ตรวจสอบว่ามีสินค้านี้ในระบบหรือยัง
-    #                 match = df_current[df_current['product_id'] == pid] if not df_current.empty else pd.DataFrame()
-                    
-    #                 has_changed = False
-    #                 if not match.empty:
-    #                     current_row = match.iloc[0]
-    #                     # เช็คการเปลี่ยนแปลง (ราคา หรือ ชื่อ)
-    #                     if (float(row['base_price']) != float(current_row['base_price']) or 
-    #                         str(row['product_name']) != str(current_row['product_name'])):
-    #                         has_changed = True
-                            
-    #                         # A. สั่งปิด Record เก่า (Expire)
-    #                         context.log.info(f"สินค้า {pid} เปลี่ยนข้อมูล -> กำลัง Expire Record เก่า")
-    #                         cur.execute(
-    #                             """
-    #                             UPDATE dim_products_history 
-    #                             SET is_current = False, end_date = %s 
-    #                             WHERE product_id = %s AND is_current = True
-    #                             """,
-    #                             (now, pid)
-    #                         )
-
-    #                 # กรณีเป็นสินค้าใหม่ หรือ สินค้าเดิมที่ข้อมูลเปลี่ยน
-    #                 if match.empty or has_changed:
-    #                     context.log.info(f"กำลังทำ Embedding สำหรับ: {row['product_name']}")
-                        
-    #                     # B. สร้าง Vector ด้วย FastEmbed
-    #                     rich_description = f"Brand: {row['brand']} | Category: {row['category']} | Product: {row['product_name']}"
-    #                     embeddings = list(embedding_model.embed([rich_description]))
-    #                     product_vector = embeddings[0].tolist()
-                        
-    #                     # C. เตรียมข้อมูลสำหรับ Insert ใหม่ (ใช้ Tuple เพื่อส่งเข้า Postgres)
-    #                     new_records_to_insert.append((
-    #                         pid,
-    #                         row['product_name'],
-    #                         row['category'],
-    #                         row['brand'],
-    #                         int(row['base_price']),
-    #                         now,
-    #                         None,
-    #                         True,
-    #                         product_vector  # psycopg จะแปลง list เป็น vector format ให้เอง
-    #                     ))
-
-    #             # 2. บันทึกข้อมูลใหม่ทั้งหมดลง Silver Table (Batch Insert)
-    #             if new_records_to_insert:
-    #                 cur.executemany(
-    #                     """
-    #                     INSERT INTO dim_products_history 
-    #                     (product_id, product_name, category, brand, base_price, start_date, end_date, is_current, product_vector)
-    #                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-    #                     """,
-    #                     new_records_to_insert
-    #                 )
-    #                 conn.commit()
-    #                 context.log.info(f"✅ บันทึกข้อมูลลง Silver สำเร็จ {len(new_records_to_insert)} รายการ")
-    #             else:
-    #                 context.log.info("ไม่มีการเปลี่ยนแปลงข้อมูล ไม่ต้องอัปเดต Silver")
-
-    # except Exception as e:
-    #     context.log.error(f"❌ เกิดข้อผิดพลาดในขั้นตอน Silver: {str(e)}")
-    #     raise e
-
-    # # ส่งค่ากลับเป็น DataFrame เพื่อใช้ใน Asset ถัดไป (ถ้ามี)
-    # return pd.DataFrame(new_records_to_insert, columns=[
-    #     "product_id", "product_name", "category", "brand", "base_price", 
-    #     "start_date", "end_date", "is_current", "product_vector"
-    # ])
 
 
 @asset()
