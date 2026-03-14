@@ -69,6 +69,9 @@ spec:
         }
 
         stage('3. Deploy via Helm') {
+            options {
+                timeout(time: 5, unit: 'MINUTES') 
+            }
             steps {
                 container('helm-kubectl') {
                 script {

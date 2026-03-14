@@ -128,7 +128,7 @@ computeLogs:
   config:
     s3ComputeLogManager:
       bucket: "dagster-logs" 
-      endpointUrl: "http://minio-service.minio.svc.cluster.local:9000" # 👈 URL ของ MinIO ใน K3s
+      endpointUrl: "http://minio.minio.svc.cluster.local:9000" # 👈 URL ของ MinIO ใน K3s
       region: "us-east-1" 
       accessKey:
         env: MINIO_ACCESS_KEY

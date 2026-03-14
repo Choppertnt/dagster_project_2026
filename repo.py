@@ -16,7 +16,7 @@ minio_io_manager = s3_pickle_io_manager.configured({
 
 # 2. นิยาม S3 Resource เพื่อต่อท่อ
 minio_resource = s3_resource.configured({
-    "endpoint_url": "http://minio-service.minio.svc.cluster.local:9000", 
+    "endpoint_url": "http://minio.minio.svc.cluster.local:9000", 
     "aws_access_key_id": MINIO_ACCESS_KEY,
     "aws_secret_access_key": MINIO_SECRET_KEY,
     "use_ssl": False,
