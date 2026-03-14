@@ -28,33 +28,31 @@ spec:
   - name: docker-sock
     hostPath:
       path: /var/run/docker.sock
-        """
+"""
         }
     }
 
     environment {
         NAMESPACE = "dagster" 
-        // 🎯 แก้ชื่อ Deployment ให้ตรงตามที่ kubectl get deploy เห็น
         DEPLOYMENT_NAME = "dagster-release-dagster-user-deployments-my-data-pipeline" 
-        
         REGISTRY = "ghcr.io"
         GH_USER = "Choppertnt"
         IMAGE_NAME = "ghcr.io/choppertnt/dagster-assets"
-  
         IMAGE_TAG  = ""
-        
         GH_CREDENTIALS_ID = "ghcr-auth" 
     }
 
-        stages {
-            stage('0. Setup Environment') {
+    stages {
+        stage('0. Setup Environment') {
             steps {
                 script {
-
+                    // 🎯 ดึงรหัส Commit SHA มาเป็น Tag
                     IMAGE_TAG = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
                     echo "📦 Current Commit SHA: ${IMAGE_TAG}"
                 }
             }
+        }
+
         stage('1. Build and Tag') {
             steps {
                 container('docker-cli') {
@@ -97,7 +95,6 @@ spec:
                     }
                 }
             }
-            // 🎯 Post เฉพาะของ Stage 3 (Rollback เมื่อพัง)
             post {
                 failure {
                     container('helm-kubectl') {
@@ -109,7 +106,6 @@ spec:
         }
     } // จบ stages
 
-    // 🎯 Post รวมของทั้ง Pipeline (Cleanup ขยะ)
     post {
         always {
             container('docker-cli') {
