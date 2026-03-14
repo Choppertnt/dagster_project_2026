@@ -131,7 +131,9 @@ runLauncher:
       imagePullPolicy: "Always"
       envSecrets:
         - name: db-dagster
-
+      runK8sConfig:
+        jobSpecConfig:
+          ttlSecondsAfterFinished: 600
 computeLogs:
   enabled: true
   type: S3ComputeLogManager
@@ -140,6 +142,8 @@ computeLogs:
       bucket: "dagster-logs" 
       endpoint_url: "http://minio.minio.svc.cluster.local:9000" # 👈 URL ของ MinIO ใน K3s
       region: "us-east-1" 
+
+
 
 postgresql:
   enabled: false 
