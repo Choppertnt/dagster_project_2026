@@ -48,6 +48,16 @@ dagsterWebserver:
         secretKeyRef:
           name: "db-dagster"
           key: "MINIO_SECRET_KEY"
+    - name: LINE_CHANNEL_ACCESS
+      valueFrom: 
+        secretKeyRef:
+          name: "db-dagster"
+          key: "LINE_CHANNEL_ACCESS"
+    - name: LINE_ADMIN_USER
+      valueFrom: 
+        secretKeyRef:
+          name: "db-dagster"
+          key: "LINE_ADMIN_USER"
   volumes:
     - name: dagster-home-vol
       emptyDir: {}
@@ -86,6 +96,16 @@ dagsterDaemon:
         secretKeyRef:
           name: "db-dagster"
           key: "postgresql-password"
+    - name: LINE_CHANNEL_ACCESS
+      valueFrom: 
+        secretKeyRef:
+          name: "db-dagster"
+          key: "LINE_CHANNEL_ACCESS"
+    - name: LINE_ADMIN_USER
+      valueFrom: 
+        secretKeyRef:
+          name: "db-dagster"
+          key: "LINE_ADMIN_USER"
   securityContext: {}
   
   volumes:
@@ -126,6 +146,16 @@ dagster-user-deployments:
             secretKeyRef:
               name: "db-dagster"
               key: "MINIO_SECRET_KEY"
+        - name: LINE_CHANNEL_ACCESS
+          valueFrom: 
+            secretKeyRef: 
+              name: "db-dagster"
+              key: "LINE_CHANNEL_ACCESS"
+        - name: LINE_ADMIN_USER
+          valueFrom: 
+            secretKeyRef:
+              name: "db-dagster"
+              key: "LINE_ADMIN_USER"
       envFrom:
         - secretRef:
             name: db-dagster
