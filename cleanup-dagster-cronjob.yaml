@@ -1,24 +1,67 @@
+---
+# 1. สร้าง ServiceAccount (บัตรพนักงานให้ภารโรง)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dagster-cleanup-sa
+  namespace: dagster
+
+---
+# 2. สร้าง Role (กำหนดสิทธิ์ว่าภารโรงทำอะไรได้บ้าง -> ลบ Pod ได้)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dagster-cleanup-role
+  namespace: dagster
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "delete"]
+
+---
+# 3. สร้าง RoleBinding (มอบสิทธิ์ให้ภารโรง)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dagster-cleanup-binding
+  namespace: dagster
+subjects:
+- kind: ServiceAccount
+  name: dagster-cleanup-sa
+  namespace: dagster
+roleRef:
+  kind: Role
+  name: dagster-cleanup-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# 4. สร้างตัว CronJob (ตารางงาน)
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: cleanup-completed-dagster-runs
-  namespace: thanathorn55551-dev
+  name: dagster-pod-cleanup
+  namespace: dagster
 spec:
-  schedule: "0 * * * *" 
-  successfulJobsHistoryLimit: 1
+  schedule: "0 * * * *" # 🎯 ตั้งเวลาทำทุกๆ นาทีที่ 0 ของทุกชั่วโมง (เช่น 13:00, 14:00)
+  successfulJobsHistoryLimit: 1 # เก็บประวัติงานกวาดขยะที่สำเร็จไว้แค่ 1 รายการ จะได้ไม่รก
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       template:
         spec:
-          serviceAccountName: default # ถ้า Permission Denied อาจจะต้องสร้าง SA ใหม่ที่มีสิทธิ์ลบ
+          serviceAccountName: dagster-cleanup-sa
+          restartPolicy: OnFailure
           containers:
-          - name: oc-container
-            # เปลี่ยนมาใช้ Image ของ OpenShift CLI โดยตรง
-            image: quay.io/openshift/origin-cli:latest 
+          - name: kubectl-cleanup
+            image: bitnami/kubectl:latest
             command:
             - /bin/sh
             - -c
-            # ใช้คำสั่ง oc แทน kubectl
-            - "oc delete pod --field-selector=status.phase=Succeeded -l dagster/job -n thanathorn55551-dev"
-          restartPolicy: OnFailure
+            - |
+              echo "🧹 เริ่มกวาดล้าง Pod ที่รันสำเร็จ (Succeeded)..."
+              kubectl delete pods -n dagster --field-selector=status.phase==Succeeded --ignore-not-found=true
+              
+              echo "🧹 เริ่มกวาดล้าง Pod ที่พัง (Failed)..."
+              kubectl delete pods -n dagster --field-selector=status.phase==Failed --ignore-not-found=true
+              
+              echo "✅ ทำความสะอาดเรียบร้อย!"
