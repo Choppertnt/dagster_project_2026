@@ -40,13 +40,21 @@ spec:
         REGISTRY = "ghcr.io"
         GH_USER = "Choppertnt"
         IMAGE_NAME = "ghcr.io/choppertnt/dagster-assets"
-        // 🎯 ใช้ Build Number ต่อท้ายเพื่อความเท่และไม่ซ้ำ
-        IMAGE_TAG = "v1.0.${env.BUILD_NUMBER}"
+  
+        IMAGE_TAG  = ""
         
         GH_CREDENTIALS_ID = "ghcr-auth" 
     }
 
         stages {
+            stage('0. Setup Environment') {
+            steps {
+                script {
+
+                    IMAGE_TAG = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
+                    echo "📦 Current Commit SHA: ${IMAGE_TAG}"
+                }
+            }
         stage('1. Build and Tag') {
             steps {
                 container('docker-cli') {

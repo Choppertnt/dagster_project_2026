@@ -120,8 +120,6 @@ runLauncher:
     k8sRunLauncher:
       imagePullPolicy: "Always"
       jobCleanupBehavior: "ALWAYS"
-      envConfigMaps:
-        - name: dagster-pipeline-env
       envSecrets:
         - name: db-dagster
 
