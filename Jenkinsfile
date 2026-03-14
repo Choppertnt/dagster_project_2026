@@ -46,24 +46,24 @@ spec:
         GH_CREDENTIALS_ID = "ghcr-auth" 
     }
 
-    stages {
+        stages {
         stage('1. Build and Tag') {
             steps {
-            container('docker-cli') {
-                sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
-                sh "docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest"
+                container('docker-cli') {
+                    sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+                    sh "docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest"
+                }
             }
-        }
         }
 
         stage('2. Push to GHCR') {
             steps {
                 container('docker-cli') {
-                withCredentials([usernamePassword(credentialsId: env.GH_CREDENTIALS_ID, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                    sh "echo ${PASS} | docker login ${REGISTRY} -u ${USER} --password-stdin"
-                    sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
-                    sh "docker push ${IMAGE_NAME}:latest"
-                }
+                    withCredentials([usernamePassword(credentialsId: env.GH_CREDENTIALS_ID, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                        sh "echo ${PASS} | docker login ${REGISTRY} -u ${USER} --password-stdin"
+                        sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
+                        sh "docker push ${IMAGE_NAME}:latest"
+                    }
                 }
             }
         }
@@ -74,34 +74,43 @@ spec:
             }
             steps {
                 container('helm-kubectl') {
-                script {
-                    echo "Deploying version ${IMAGE_TAG} to K3s..."
-                    // 🎯 ใช้ helm upgrade --set เพื่อความยั่งยืน
-                    // หมายเหตุ: เช็คโครงสร้าง path ของ tag ใน values.yaml ของนายให้ดี
-                    sh """
-                    helm repo add dagster https://dagster-io.github.io/helm
-                    helm repo update
-                    helm upgrade --install dagster-release dagster/dagster \
-                      -n ${NAMESPACE} \
-                      -f values.yaml \
-                      --set dagster-user-deployments.deployments[0].image.tag=${IMAGE_TAG}
-                    """
-                    sh "kubectl rollout status deployment/${DEPLOYMENT_NAME} -n ${NAMESPACE}"
+                    script {
+                        echo "🚀 Deploying version ${IMAGE_TAG} to K3s..."
+                        sh """
+                        helm repo add dagster https://dagster-io.github.io/helm
+                        helm repo update
+                        helm upgrade --install dagster-release dagster/dagster \
+                          -n ${NAMESPACE} \
+                          -f values.yaml \
+                          --set dagster-user-deployments.deployments[0].image.tag=${IMAGE_TAG}
+                        """
+                        echo "⏳ Waiting for rollout to finish..."
+                        sh "kubectl rollout status deployment/${DEPLOYMENT_NAME} -n ${NAMESPACE}"
+                    }
                 }
             }
+            // 🎯 Post เฉพาะของ Stage 3 (Rollback เมื่อพัง)
+            post {
+                failure {
+                    container('helm-kubectl') {
+                        echo "❌ Deploy พัง! กำลัง Rollback..."
+                        sh "kubectl rollout undo deployment/${DEPLOYMENT_NAME} -n ${NAMESPACE}"
+                    }
+                }
             }
         }
-    }
+    } // จบ stages
 
+    // 🎯 Post รวมของทั้ง Pipeline (Cleanup ขยะ)
     post {
-        success {
-            echo "Successfully deployed ${IMAGE_TAG}!"
-        }
         always {
             container('docker-cli') {
-                echo "Cleaning up dangling images..."
+                echo "🧹 Cleaning up dangling images..."
                 sh "docker image prune -f"
             }
+        }
+        success {
+            echo "🎉 งานเสร็จสมบูรณ์! Version ${IMAGE_TAG} รันอยู่บน K3s แล้ว"
         }
     }
 }
