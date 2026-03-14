@@ -25,8 +25,9 @@ class UserProfileConfig(Config):
 DB_HOST = os.getenv("DB_HOST")
 DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
-DB_PASS = quote_plus(os.getenv("DB_PASS"))
+DB_PASS = os.getenv("DB_PASS")
 DB_PORT = os.getenv("DB_PORT")
+
 
 encoded_pass = urllib.parse.quote_plus(DB_PASS) if DB_PASS else ""
 CONN_STR = f"postgresql://{DB_USER}:{encoded_pass}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
@@ -263,6 +264,7 @@ def create_dim_warehouse(context: AssetExecutionContext, inventory_bronze: pd.Da
 
 from sqlalchemy import create_engine, text
 ENGINE = create_engine(CONN_STR)
+print(CONN_STR)
 @asset(deps=['product_bronze'])
 def migrate_to_silver_history(context: AssetExecutionContext, product_bronze):
     """
