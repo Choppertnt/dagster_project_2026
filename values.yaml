@@ -150,5 +150,5 @@ computeLogs:
 postgresql:
   enabled: false 
   postgresqlHost: "internal-postgres-postgresql.postgresql.svc.cluster.local"
-  postgresqlUsername: "dagster_user"
-  postgresqlDatabase: "dagster_metadata"
+  postgresqlUsername: "postgres" 
+  postgresqlDatabase: "postgres"
