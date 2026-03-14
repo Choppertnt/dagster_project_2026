@@ -152,3 +152,4 @@ postgresql:
   postgresqlHost: "internal-postgres-postgresql.postgresql.svc.cluster.local"
   postgresqlUsername: "postgres" 
   postgresqlDatabase: "postgres"
+  postgresqlPort: 30432
