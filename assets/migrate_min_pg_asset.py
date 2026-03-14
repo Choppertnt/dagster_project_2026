@@ -263,13 +263,13 @@ def create_dim_warehouse(context: AssetExecutionContext, inventory_bronze: pd.Da
     return df_new_wh
 
 from sqlalchemy import create_engine, text
-ENGINE = create_engine(CONN_STR)
-print(CONN_STR)
+
 @asset(deps=['product_bronze'])
 def migrate_to_silver_history(context: AssetExecutionContext, product_bronze):
     """
     ขั้นตอน Silver: ทำ Vector Search และเก็บประวัติแบบ SCD Type 2 ลง PostgreSQL
     """
+    ENGINE = create_engine(CONN_STR)
     df_bronze = product_bronze
     now = datetime.utcnow()
 
