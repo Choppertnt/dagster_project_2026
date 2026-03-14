@@ -7,6 +7,7 @@ from fastembed import TextEmbedding
 from datetime import datetime
 import urllib.parse
 import psycopg
+from urllib.parse import quote_plus
 from sensors.failure_alerts import send_line_oa_push
 # ข้อมูลการเชื่อมต่อ (แนะนำให้ใช้ Environment Variables เพื่อความปลอดภัยครับ)
 MINIO_ENDPOINT = "minio.minio.svc.cluster.local:9000"
@@ -24,7 +25,7 @@ class UserProfileConfig(Config):
 DB_HOST = os.getenv("DB_HOST")
 DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
-DB_PASS = os.getenv("DB_PASS")
+DB_PASS = quote_plus(os.getenv("DB_PASS"))
 DB_PORT = os.getenv("DB_PORT")
 
 encoded_pass = urllib.parse.quote_plus(DB_PASS) if DB_PASS else ""
