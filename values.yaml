@@ -119,7 +119,8 @@ runLauncher:
   config:
     k8sRunLauncher:
       imagePullPolicy: "Always"
-      jobCleanupBehavior: "ALWAYS"
+      runK8sConfig:
+        jobCleanupBehavior: "ALWAYS"
       envSecrets:
         - name: db-dagster
 
