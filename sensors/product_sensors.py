@@ -10,7 +10,7 @@ def minio_product_csv_sensor(context):
     # 1. เชื่อมต่อ MinIO (แบบเดียวกับที่คุณใช้ใน Asset เลย)
     # ⚠️ ข้อควรระวัง: ห้ามใส่ http:// หรือ https:// นำหน้า
     client = Minio(
-        "http://minio.minio.svc.cluster.local:9000", 
+        "minio.minio.svc.cluster.local:9000", 
         access_key=os.getenv("MINIO_ACCESS_KEY"),
         secret_key=os.getenv("MINIO_SECRET_KEY"),
         secure=False  # ถ้า Route บน OpenShift เป็น HTTPS ให้เปลี่ยนเป็น True ครับ
