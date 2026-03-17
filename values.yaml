@@ -4,6 +4,8 @@ global:
     - name: ghcr-auth
   postgresqlSecretName: "db-dagster"
   dagsterHome: "/opt/dagster/dagster_home"
+  envSecrets:
+    - name: db-dagster
 dagsterWebserver:
   replicaCount: 1
   image:
@@ -169,16 +171,17 @@ runLauncher:
       runK8sConfig:
         jobSpecConfig:
           ttlSecondsAfterFinished: 600
-computeLogs:
-  enabled: true
+computeLogManager:
   type: S3ComputeLogManager
   config:
     s3ComputeLogManager:
       bucket: "dagster-logs" 
-      endpoint_url: "http://minio.minio.svc.cluster.local:9000" # 👈 URL ของ MinIO ใน K3s
-      region: "us-east-1" 
-
-
+      prefix: "dagster" # แนะนำให้ใส่ prefix เพื่อให้ log เป็นระเบียบ
+      endpoint_url: "http://minio.minio.svc.cluster.local:9000" 
+      # 🚨 ทริคสำคัญสำหรับ MinIO: ต้องบังคับให้ใช้ path-style
+      use_ssl: false # ถ้า MinIO ในคลัสเตอร์ไม่ได้ใช้ HTTPS ให้ใส่เป็น false
+      kwargs:
+        endpoint_url: "http://minio.minio.svc.cluster.local:9000"
 
 postgresql:
   enabled: false 
