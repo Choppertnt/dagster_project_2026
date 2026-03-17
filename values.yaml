@@ -149,6 +149,11 @@ dagster-user-deployments:
             secretKeyRef:
               name: "db-dagster"
               key: "MINIO_ACCESS_KEY"
+        - name: DB_PASS # 👈 หรือชื่อตัวแปรที่นายใช้ในโค้ด Python
+          valueFrom:
+            secretKeyRef:
+              name: "db-dagster"
+              key: "postgresql-password"
         - name: AWS_SECRET_ACCESS_KEY
           valueFrom: 
             secretKeyRef:
