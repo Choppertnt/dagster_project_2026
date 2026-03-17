@@ -18,7 +18,8 @@ CONN_STR = f"postgresql://{DB_USER}:{encoded_pass}@{DB_HOST}:{DB_PORT}/{DB_NAME}
 def stg_userprofile_sensor(context):
     
     # 1. อ่านเวลาที่เคยรันล่าสุดจาก Cursor (ถ้ารันครั้งแรกให้เป็นอดีตไกลๆ)
-    last_processed_date = context.cursor or '1970-01-01 00:00:00'
+    last_processed_date = context.cursor or '1970-01-01T00:00:00+00:00'
+    context.log.info(f"🔍 [Check] Sensor กำลังหาข้อมูลที่ใหม่กว่า: {last_processed_date}")
     
     try:
         with psycopg.connect(CONN_STR) as conn:
@@ -35,6 +36,8 @@ def stg_userprofile_sensor(context):
                 if result and result[0] > 0:
                     row_count = result[0]
                     new_max_date = result[1]
+
+                    cursor_to_save = new_max_date.isoformat()
                     
                     context.log.info(f"🚨 เจอข้อมูลใหม่ {row_count} รายการที่เพิ่งเข้ามาหลังเวลา {last_processed_date}")
                     
@@ -47,7 +50,7 @@ def stg_userprofile_sensor(context):
                                     "config": {
                                         # ส่งช่วงเวลาไปให้ Asset query
                                         "start_after": last_processed_date, 
-                                        "end_at": new_max_date.strftime('%Y-%m-%d %H:%M:%S.%f')
+                                        "end_at": cursor_to_save
                                     }
                                 }
                             }
@@ -56,7 +59,7 @@ def stg_userprofile_sensor(context):
                     
                     # 4. อัปเดต Cursor เลื่อนจุด Watermark ไปที่เวลาล่าสุด
                     # รอบหน้า Sensor จะได้ไม่เอาข้อมูลเก่ามารันซ้ำ
-                    context.update_cursor(new_max_date.strftime('%Y-%m-%d %H:%M:%S.%f'))
+                    context.update_cursor(cursor_to_save)
 
     except Exception as e:
         context.log.error(f"Sensor Error: {e}")
