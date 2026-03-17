@@ -38,15 +38,15 @@ def stg_userprofile_sensor(context):
                 
                 if result and result[0] > 0:
                     row_count = result[0]
-                    new_max_date = result[1]
 
-                    cursor_to_save = new_max_date.isoformat()
+                    cursor_to_save = result[1]
+                    safe_run_key = cursor_to_save.replace(' ', '_').replace(':', '').replace('+', '')
                     
                     context.log.info(f"🚨 เจอข้อมูลใหม่ {row_count} รายการที่เพิ่งเข้ามาหลังเวลา {last_processed_date}")
                     
                     # 3. สั่ง Trigger Job พร้อมแนบเวลาไปให้ Asset รู้ว่าต้องจัดการก้อนไหน
                     yield RunRequest(
-                        run_key=f"stg_user_{new_max_date.isoformat()}",
+                        run_key=f"stg_user_{safe_run_key}",
                         run_config={
                             "ops": {
                                 "user_profile_silver": { # ชื่อ Op/Asset ของเรา
