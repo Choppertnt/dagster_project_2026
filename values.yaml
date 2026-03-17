@@ -44,12 +44,12 @@ dagsterWebserver:
       valueFrom: 
         secretKeyRef:
           name: "db-dagster"
-          key: "MINIO_ACCESS_KEY"
+          key: "MINIO_ACCESS_KEY_API"
     - name: AWS_SECRET_ACCESS_KEY
       valueFrom: 
         secretKeyRef:
           name: "db-dagster"
-          key: "MINIO_SECRET_KEY"
+          key: "MINIO_SECRET_KEY_API"
     - name: LINE_CHANNEL_ACCESS
       valueFrom: 
         secretKeyRef:
