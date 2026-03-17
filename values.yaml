@@ -144,10 +144,6 @@ dagster-user-deployments:
           value: "dagster_user"
         - name: DAGSTER_PG_DB
           value: "postgres"
-        - name: DAGSTER_PG_PASSWORD
-          secretKeyRef:
-            name: "db-dagster"
-            key: "DB_PASS"
         - name: AWS_ACCESS_KEY_ID
           valueFrom: 
             secretKeyRef:
