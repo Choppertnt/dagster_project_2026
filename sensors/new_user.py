@@ -18,32 +18,35 @@ CONN_STR = f"postgresql://{DB_USER}:{encoded_pass}@{DB_HOST}:{DB_PORT}/{DB_NAME}
 def stg_userprofile_sensor(context):
     
     # 1. อ่านเวลาที่เคยรันล่าสุดจาก Cursor (ถ้ารันครั้งแรกให้เป็นอดีตไกลๆ)
-    last_processed_date = context.cursor or '1970-01-01T00:00:00+00:00'
+    last_processed_date = context.cursor or '1970-01-01T00:00:00+07:00'
     context.log.info(f"🔍 [Check] Sensor กำลังหาข้อมูลที่ใหม่กว่า: {last_processed_date}")
     
     try:
         with psycopg.connect(CONN_STR) as conn:
+            conn.execute("SET TIME ZONE 'Asia/Bangkok';")
             with conn.cursor() as cur:
                 # 2. Query หาเฉพาะแถวที่ "ใหม่กว่า" เวลาที่เคยรันล่าสุด
                 cur.execute("""
-                    SELECT COUNT(*), MAX(upload_date) 
+                        SELECT 
+                        COUNT(*), 
+                        to_char(MAX(upload_date), 'YYYY-MM-DD HH24:MI:SS.MS TZHTZM')
                     FROM stg_userprofile 
-                    WHERE upload_date > %s;
+                    WHERE upload_date > %s::timestamptz;
                 """, (last_processed_date,))
                 
                 result = cur.fetchone()
                 
                 if result and result[0] > 0:
                     row_count = result[0]
-                    new_max_date = result[1]
 
-                    cursor_to_save = new_max_date.isoformat()
+                    cursor_to_save = result[1]
+                    safe_run_key = cursor_to_save.replace(' ', '_').replace(':', '').replace('+', '')
                     
                     context.log.info(f"🚨 เจอข้อมูลใหม่ {row_count} รายการที่เพิ่งเข้ามาหลังเวลา {last_processed_date}")
                     
                     # 3. สั่ง Trigger Job พร้อมแนบเวลาไปให้ Asset รู้ว่าต้องจัดการก้อนไหน
                     yield RunRequest(
-                        run_key=f"stg_user_{new_max_date.isoformat()}",
+                        run_key=f"stg_user_{safe_run_key}",
                         run_config={
                             "ops": {
                                 "user_profile_silver": { # ชื่อ Op/Asset ของเรา
