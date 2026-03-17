@@ -138,6 +138,16 @@ dagster-user-deployments:
       env:
         - name: HOME
           value: "/opt/dagster/dagster_home"
+        - name: DB_HOST
+          value: "internal-postgres-postgresql.postgresql.svc.cluster.local"
+        - name: DAGSTER_PG_USER
+          value: "dagster_user"
+        - name: DAGSTER_PG_DB
+          value: "postgres"
+        - name: DAGSTER_PG_PASSWORD
+          secretKeyRef:
+            name: "db-dagster"
+            key: "DB_PASS"
         - name: AWS_ACCESS_KEY_ID
           valueFrom: 
             secretKeyRef:
@@ -171,6 +181,8 @@ runLauncher:
       runK8sConfig:
         jobSpecConfig:
           ttlSecondsAfterFinished: 600
+      envVars:
+        - "AWS_ENDPOINT_URL=http://minio.minio.svc.cluster.local:9000"
 computeLogManager:
   type: S3ComputeLogManager
   config:
