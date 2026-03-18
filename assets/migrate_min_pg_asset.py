@@ -1,4 +1,4 @@
-from dagster import asset, AssetExecutionContext , AssetIn , Config
+from dagster import asset, AssetExecutionContext , AssetIn , Config , MaterializeResult
 import pandas as pd
 from minio import Minio 
 import io
@@ -380,6 +380,8 @@ def user_profile_silver(context: AssetExecutionContext , config: UserProfileConf
                       AND d.start_date < s_first.min_upload_date;
                 """, config.dict())
 
+                updated_rows = cur.rowcount
+
                 # --- Step 2: Insert เฉพาะแถวที่ "ยังไม่มี" ใน Dimension เท่านั้น ---
                 cur.execute("""
                     INSERT INTO dim_user_history 
@@ -402,8 +404,18 @@ def user_profile_silver(context: AssetExecutionContext , config: UserProfileConf
                           AND target.start_date = ordered_stg.upload_date
                     );
                 """, config.dict())
+                inserted_rows = cur.rowcount
+                
                 conn.commit()
-                context.log.info("✅ SCD Type 2 Fixed: Dates are contiguous and no duplicates.")
+                context.log.info(f"✅ SCD Type 2 Processed: Updated {updated_rows} rows, Inserted {inserted_rows} rows.")
+                return MaterializeResult(
+                    metadata={
+                        "rows_updated": updated_rows,
+                        "rows_inserted": inserted_rows,
+                        "start_after": config.start_after,
+                        "end_at": config.end_at
+                    }
+                )
                 
     except Exception as e:
         conn.rollback() 
