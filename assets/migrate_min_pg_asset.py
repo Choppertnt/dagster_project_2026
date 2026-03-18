@@ -360,6 +360,7 @@ def user_profile_silver(context: AssetExecutionContext , config: UserProfileConf
     try:
         with psycopg.connect(CONN_STR) as conn:
             with conn.cursor() as cur:
+                context.log.info(f"⏳ เช็คเวลา! Start: {config.start_after} | End: {config.end_at}")
                 
             # --- Step 1: ปิดประวัติเก่า เฉพาะเมื่อมีข้อมูลใหม่ "ที่ต่างจากเดิม" เข้ามาเท่านั้น ---
                 cur.execute("""
