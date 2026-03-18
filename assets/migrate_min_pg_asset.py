@@ -310,11 +310,7 @@ def migrate_to_silver_history(context: AssetExecutionContext, product_bronze):
 
                     # กรณีเป็นสินค้าใหม่ หรือ สินค้าเดิมที่ข้อมูลเปลี่ยน
                     if match.empty or has_changed:
-                        context.log.info(f"กำลังทำ Embedding สำหรับ: {row['product_name']}")
-                        
-                        # B. สร้าง Vector ด้วย FastEmbed
-                        search_keywords = f"{row['brand']} {row['category']} {row['product_name']}".lower()
-                        context.log.info(f"เตรียมข้อมูลค้นหาสำหรับ: {search_keywords}")
+
                         
                         # C. เตรียมข้อมูลสำหรับ Insert ใหม่ (ใช้ Tuple เพื่อส่งเข้า Postgres)
                         new_records_to_insert.append((
@@ -325,8 +321,7 @@ def migrate_to_silver_history(context: AssetExecutionContext, product_bronze):
                             int(row['base_price']),
                             now,
                             None,
-                            True,
-                            search_keywords  # psycopg จะแปลง list เป็น vector format ให้เอง
+                            True
                         ))
 
                 # 2. บันทึกข้อมูลใหม่ทั้งหมดลง Silver Table (Batch Insert)
@@ -334,8 +329,8 @@ def migrate_to_silver_history(context: AssetExecutionContext, product_bronze):
                     cur.executemany(
                         """
                         INSERT INTO dim_products_history 
-                        (product_id, product_name, category, brand, base_price, start_date, end_date, is_current, search_keywords)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        (product_id, product_name, category, brand, base_price, start_date, end_date, is_current)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         new_records_to_insert
                     )
@@ -351,9 +346,29 @@ def migrate_to_silver_history(context: AssetExecutionContext, product_bronze):
     # ส่งค่ากลับเป็น DataFrame เพื่อใช้ใน Asset ถัดไป (ถ้ามี)
     return pd.DataFrame(new_records_to_insert, columns=[
         "product_id", "product_name", "category", "brand", "base_price", 
-        "start_date", "end_date", "is_current", "product_vector"
+        "start_date", "end_date", "is_current"
     ])
 
+@asset(deps=[migrate_to_silver_history]) # 📍 ให้ทำงานหลังจากตารางหลักเสร็จ
+def product_search_sync(context: AssetExecutionContext):
+    with psycopg.connect(CONN_STR) as conn:
+        with conn.cursor() as cur:
+            # ดึงข้อมูลที่เป็น Current เท่านั้นมารวมร่าง (Concatenate)
+            cur.execute("""
+                INSERT INTO product_search_index (product_id, search_text)
+                SELECT 
+                    product_id, 
+                    LOWER(product_name || ' ' || COALESCE(brand, '') || ' ' || COALESCE(category, ''))
+                FROM dim_products_history
+                WHERE is_current = TRUE
+                ON CONFLICT (product_id) 
+                DO UPDATE SET 
+                    search_text = EXCLUDED.search_text,
+                    last_updated = CURRENT_TIMESTAMP;
+            """)
+            updated_count = cur.rowcount
+            conn.commit()
+            context.log.info(f"🔄 Sync Search Index สำเร็จ: {updated_count} แถว")
 
 @asset()
 def user_profile_silver(context: AssetExecutionContext , config: UserProfileConfig):
