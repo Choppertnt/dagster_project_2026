@@ -15,7 +15,7 @@ CONN_STR = f"postgresql://{DB_USER}:{encoded_pass}@{DB_HOST}:{DB_PORT}/{DB_NAME}
 
 
 @sensor(job=user_profile_silver_job)
-    
+def stg_userprofile_sensor(context):
     # 1. อ่านเวลาที่เคยรันล่าสุดจาก Cursor (ถ้ารันครั้งแรกให้เป็นอดีตไกลๆ)
     last_processed_date = context.cursor or '1970-01-01T00:00:00+07:00'
     context.log.info(f"🔍 [Check] Sensor กำลังหาข้อมูลที่ใหม่กว่า: {last_processed_date}")

@@ -200,5 +200,5 @@ postgresql:
   enabled: false 
   postgresqlHost: "internal-postgres-postgresql.postgresql.svc.cluster.local"
   postgresqlUsername: "dagster_user" 
-  postgresqlDatabase: "postgres"
-  postgresqlPort: 30432
+  postgresqlDatabase: "dagster_metadata"
+  postgresqlPort: 5432
