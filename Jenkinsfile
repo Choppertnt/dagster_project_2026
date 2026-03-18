@@ -88,7 +88,8 @@ spec:
                         helm upgrade --install dagster-release dagster/dagster \
                           -n ${NAMESPACE} \
                           -f values.yaml \
-                          --set dagster-user-deployments.deployments[0].image.tag=${IMAGE_TAG}
+                          --set dagster-user-deployments.deployments[0].image.tag=${IMAGE_TAG} \
+                          --history-max 5
                         """
                         echo "⏳ Waiting for rollout to finish..."
                         sh "kubectl rollout status deployment/${DEPLOYMENT_NAME} -n ${NAMESPACE}"
