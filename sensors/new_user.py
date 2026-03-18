@@ -56,7 +56,8 @@ def stg_userprofile_sensor(context):
                                     }
                                 }
                             }
-                        }
+                        },
+                        cursor = cursor_to_save
                     )
                     
                     # 4. อัปเดต Cursor เลื่อนจุด Watermark ไปที่เวลาล่าสุด

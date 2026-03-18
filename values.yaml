@@ -139,10 +139,15 @@ dagster-user-deployments:
         - name: HOME
           value: "/opt/dagster/dagster_home"
         - name: DB_HOST
-          value: "internal-postgres-postgresql.postgresql.svc.cluster.local"
-        - name: DAGSTER_PG_USER
+          value: "84.247.145.103"
+        - name: DB_PORT
+          valueFrom: 
+            secretKeyRef:
+              name: "db-dagster"
+              key: "DB_PORT"
+        - name: DB_USER
           value: "dagster_user"
-        - name: DAGSTER_PG_DB
+        - name: DB_NAME
           value: "postgres"
         - name: AWS_ENDPOINT_URL 
           value: "http://minio.minio.svc.cluster.local:9000"
@@ -181,9 +186,6 @@ dagster-user-deployments:
             secretKeyRef:
               name: "db-dagster"
               key: "LINE_ADMIN_USER"
-      envFrom:
-        - secretRef:
-            name: db-dagster
 runLauncher:
   type: K8sRunLauncher
   config:
