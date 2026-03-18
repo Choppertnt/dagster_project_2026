@@ -3,7 +3,6 @@ import pandas as pd
 from minio import Minio 
 import io
 import os
-from fastembed import TextEmbedding
 from datetime import datetime
 import urllib.parse
 import psycopg
@@ -32,7 +31,6 @@ DB_PORT = os.getenv("DB_PORT")
 encoded_pass = urllib.parse.quote_plus(DB_PASS) if DB_PASS else ""
 CONN_STR = f"postgresql://{DB_USER}:{encoded_pass}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-embedding_model = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
 
 
 @asset
@@ -405,7 +403,7 @@ def user_profile_silver(context: AssetExecutionContext , config: UserProfileConf
                     );
                 """, config.dict())
                 inserted_rows = cur.rowcount
-                
+
                 conn.commit()
                 context.log.info(f"✅ SCD Type 2 Processed: Updated {updated_rows} rows, Inserted {inserted_rows} rows.")
                 return MaterializeResult(
