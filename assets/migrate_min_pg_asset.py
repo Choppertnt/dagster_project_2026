@@ -499,7 +499,7 @@ def stock_alert_job(context: AssetExecutionContext):
                 msg = f"⚠️ ALARM: Low Stock!\n--------------------\n📦 Product: {p_id}\n🏭 Warehouse: {wh_id}\n📉 Qty: {qty}\n--------------------\n"
                 
                 # ส่ง LINE
-                send_line_oa_push(msg)
+                send_line_oa_push(context,msg)
                 context.log.info(f"Sent LINE OA Push for {p_id}")
 
                 # บันทึกประวัติลง DB
