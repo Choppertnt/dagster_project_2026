@@ -436,7 +436,6 @@ def user_profile_silver(context: AssetExecutionContext , config: UserProfileConf
         context.log.error(f"❌ Pipeline Failed: {e}")
         raise e
 
-ALERT_COOLDOWN_MINUTES = 3600
 
 @asset(
     description="เช็คสต็อกเหลือน้อย และแจ้งเตือนผ่าน LINE OA (Messaging API)"
@@ -480,7 +479,6 @@ def stock_alert_job(context: AssetExecutionContext):
 				ON c.warehouse_id = warehouse.warehouse_id_pk
             WHERE 
                 l.last_alert_time IS NULL 
-                OR l.last_alert_time < NOW() - INTERVAL '{ALERT_COOLDOWN_MINUTES} minutes'
             """
             cur.execute(sql)
             rows = cur.fetchall()
@@ -492,8 +490,8 @@ def stock_alert_job(context: AssetExecutionContext):
             context.log.info(f"🔥 Found {len(rows)} items to alert!")    
             
             for row in rows:
-                p_id = row['product_id']
-                wh_id = row['warehouse_id']
+                p_id = row['product_name']
+                wh_id = row['warehouse_name']
                 qty = row['stock_level']
 
                 # แต่งข้อความ
@@ -506,7 +504,7 @@ def stock_alert_job(context: AssetExecutionContext):
                 # บันทึกประวัติลง DB
                 # ⚠️ สังเกตการใช้ %s แทน f-string เพื่อความปลอดภัย
                 insert_sql = """
-                    INSERT INTO public.alert_history (product_id, warehouse_id, quantity, alerted_at)
+                    INSERT INTO public.alert_history (product_name, warehouse_name, quantity, alerted_at)
                     VALUES (%s, %s, %s, NOW())
                 """
                 cur.execute(insert_sql, (p_id, wh_id, qty))
