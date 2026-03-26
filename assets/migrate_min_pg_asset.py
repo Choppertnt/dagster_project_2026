@@ -448,35 +448,36 @@ def stock_alert_job(context: AssetExecutionContext):
             f"""
             WITH current_stock AS (
                 SELECT 
-                    fk_product_id as product_id, 
-                    fk_warehouse_id as warehouse_id, 
+                    products.product_name, 
+                    warehouse.warehouse_name , 
                     stock_level 
-                FROM fct_inventory_history
-                WHERE is_current = TRUE and stock_level < 10
+                FROM fct_inventory_history c
+				LEFT JOIN public.dim_products_history products
+				ON c.fk_product_id = products.pk_id
+				LEFT JOIN public.dim_warehouses warehouse
+				ON c.fk_warehouse_id = warehouse.warehouse_id_pk
+                WHERE c.is_current = TRUE and stock_level < 10
 
             ),
             last_alerts AS (
                 SELECT 
-                    product_id, 
-                    warehouse_id, 
+                    product_name, 
+                    warehouse_name, 
                     MAX(alerted_at) as last_alert_time
                 FROM alert_history
-                GROUP BY product_id, warehouse_id
+                GROUP BY product_name, warehouse_name
             )
 
             SELECT 
-                products.product_name, 
-                warehouse.warehouse_name, 
+                c.product_name, 
+                c.warehouse_name, 
                 c.stock_level,
                 l.last_alert_time
             FROM current_stock c
             LEFT JOIN last_alerts l 
-                ON c.product_id = cast(l.product_id as int) 
-                AND c.warehouse_id = cast(l.warehouse_id as int)
-			LEFT JOIN public.dim_products_history products
-				ON c.product_id = products.pk_id
-			LEFT JOIN public.dim_warehouses warehouse
-				ON c.warehouse_id = warehouse.warehouse_id_pk
+                ON c.product_name = l.product_name
+                AND c.warehouse_name = l.warehouse_name 
+
             WHERE 
                 l.last_alert_time IS NULL 
             """
@@ -495,7 +496,7 @@ def stock_alert_job(context: AssetExecutionContext):
                 qty = row['stock_level']
 
                 # แต่งข้อความ
-                msg = f"⚠️ ALARM: Low Stock!\n--------------------\n📦 Product: {p_id}\n🏭 Warehouse: {wh_id}\n📉 Qty: {qty}\n--------------------\n(System will cooldown for {ALERT_COOLDOWN_MINUTES} mins)"
+                msg = f"⚠️ ALARM: Low Stock!\n--------------------\n📦 Product: {p_id}\n🏭 Warehouse: {wh_id}\n📉 Qty: {qty}\n--------------------\n"
                 
                 # ส่ง LINE
                 send_line_oa_push(msg)
