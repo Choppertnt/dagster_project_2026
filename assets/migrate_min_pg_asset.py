@@ -449,11 +449,12 @@ def stock_alert_job(context: AssetExecutionContext):
             f"""
             WITH current_stock AS (
                 SELECT 
-                    product_id, 
-                    warehouse_id, 
+                    fk_product_id as product_id, 
+                    fk_warehouse_id as warehouse_id, 
                     stock_level 
                 FROM fct_inventory_history
                 WHERE is_current = TRUE and stock_level < 10
+
             ),
             last_alerts AS (
                 SELECT 
@@ -465,14 +466,18 @@ def stock_alert_job(context: AssetExecutionContext):
             )
 
             SELECT 
-                c.product_id, 
-                c.warehouse_id, 
+                products.product_name, 
+                warehouse.warehouse_name, 
                 c.stock_level,
                 l.last_alert_time
             FROM current_stock c
             LEFT JOIN last_alerts l 
-                ON c.product_id = l.product_id 
-                AND c.warehouse_id = l.warehouse_id
+                ON c.product_id = cast(l.product_id as int) 
+                AND c.warehouse_id = cast(l.warehouse_id as int)
+			LEFT JOIN public.dim_products_history products
+				ON c.product_id = products.pk_id
+			LEFT JOIN public.dim_warehouses warehouse
+				ON c.warehouse_id = warehouse.warehouse_id_pk
             WHERE 
                 l.last_alert_time IS NULL 
                 OR l.last_alert_time < NOW() - INTERVAL '{ALERT_COOLDOWN_MINUTES} minutes'
