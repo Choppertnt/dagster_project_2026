@@ -513,3 +513,94 @@ def stock_alert_job(context: AssetExecutionContext):
         
 
     
+@asset(
+    description="เช็ค Stock จบวัน Transaction ครบไหม"
+)
+def reconcile_inventory_asset(context: AssetExecutionContext):
+    with psycopg.connect(CONN_STR) as conn:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+            sql = '''
+
+            WITH stg_data AS (
+                SELECT pro.product_name, ware.warehouse_name, inven.stock_level 
+                FROM public.stg_inventory inven
+                LEFT JOIN dim_products_history pro ON inven.product_id = pro.product_id
+                LEFT JOIN dim_warehouses ware ON inven.warehouse_id = ware.warehouse_id
+            ),
+            brz_data AS (
+                SELECT pro.product_name, ware.warehouse_name, MIN(cdc.new_stock_level) as stock_level 
+                FROM public.brz_inventory_cdc cdc
+                LEFT JOIN dim_products_history pro ON cdc.product_id = pro.product_id
+                LEFT JOIN dim_warehouses ware ON cdc.warehouse_id = ware.warehouse_id
+                GROUP BY pro.product_name, ware.warehouse_name
+            ),
+            fct_data AS (
+                SELECT pro.product_name, ware.warehouse_name, invent.stock_level 
+                FROM public.fct_inventory_history invent
+                LEFT JOIN dim_products_history pro ON invent.fk_product_id = pro.pk_id
+                LEFT JOIN dim_warehouses ware ON invent.fk_warehouse_id = ware.warehouse_id_pk
+                WHERE invent.is_current = true
+            ),
+            reconcile_result AS (
+                SELECT 
+                    COALESCE(s.product_name, b.product_name, f.product_name) AS product_name,
+                    COALESCE(s.warehouse_name, b.warehouse_name, f.warehouse_name) AS warehouse_name,
+                    s.stock_level AS stg_stock,
+                    b.stock_level AS brz_stock,
+                    f.stock_level AS fct_stock,
+                    CASE 
+                        WHEN s.stock_level = b.stock_level AND b.stock_level = f.stock_level THEN '✅ MATCH'
+                        WHEN s.stock_level IS NULL OR b.stock_level IS NULL OR f.stock_level IS NULL THEN '⚠️ MISSING_DATA'
+                        ELSE '❌ MISMATCH'
+                    END AS status_flag
+                FROM stg_data s
+                FULL OUTER JOIN brz_data b ON s.product_name = b.product_name AND s.warehouse_name = b.warehouse_name
+                FULL OUTER JOIN fct_data f ON COALESCE(s.product_name, b.product_name) = f.product_name 
+                                           AND COALESCE(s.warehouse_name, b.warehouse_name) = f.warehouse_name
+            )
+            SELECT * FROM reconcile_result 
+
+
+            '''
+            cur.execute(sql)
+            all_rows = cur.fetchall()
+            matched_rows = [row for row in all_rows if row['status_flag'] == '✅ MATCH']
+            error_rows = [row for row in all_rows if row['status_flag'] != '✅ MATCH']
+            total_count = len(all_rows)
+            match_count = len(matched_rows)
+            error_count = len(error_rows)
+            # ถ้าไม่มีอะไรผิดปกติ จบการทำงาน
+            if error_count == 0:
+                context.log.info(f"✅ Data Reconciliation Passed: ข้อมูลตรงกัน 100% (ตรวจสอบทั้งหมด {total_count} รายการ)")
+                return
+            
+            # ถ้าเจอตัวผิดปกติ ให้ประกอบร่างข้อความส่ง LINE
+            context.log.warning(f"⚠️ ตรวจสอบทั้งหมด {total_count} รายการ | ตรงกัน {match_count} รายการ | ไม่ตรงกัน {error_count} รายการ")
+            
+            # ✨ เพิ่มสรุปตัวเลขไว้ด้านบนของข้อความ
+            msg = f"🚨 Data Reconcile Alert! 🚨\n"
+            msg += f"📊 ตรวจสอบทั้งหมด: {total_count} รายการ\n"
+            msg += f"✅ ตรงกัน: {match_count} รายการ\n"
+            msg += f"❌ ไม่ตรงกัน: {error_count} รายการ\n"
+            msg += "-" * 20 + "\n"
+            msg += f"📌 รายละเอียดตัวที่ผิดปกติ:\n\n"
+            
+            # แสดงรายละเอียดแค่ 10 รายการแรก เหมือนเดิม
+            for i, row in enumerate(error_rows[:10]):
+                p_name = row['product_name'] or "Unknown"
+                w_name = row['warehouse_name'] or "Unknown"
+                stg = row['stg_stock'] if row['stg_stock'] is not None else 'NULL'
+                brz = row['brz_stock'] if row['brz_stock'] is not None else 'NULL'
+                fct = row['fct_stock'] if row['fct_stock'] is not None else 'NULL'
+                flag = row['status_flag']
+                
+                msg += f"📦 {p_name} ({w_name})\n"
+                msg += f"   STG: {stg} | BRZ: {brz} | FCT: {fct}\n"
+                msg += f"   Status: {flag}\n\n"
+            
+            if len(error_rows) > 10:
+                msg += f"...และอื่นๆ อีก {len(error_rows) - 10} รายการ"
+                
+            # ส่งแจ้งเตือน
+            send_line_oa_push(context, msg)
+
