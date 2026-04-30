@@ -33,8 +33,13 @@ CONN_STR = f"postgresql://{DB_USER}:{encoded_pass}@{DB_HOST}:{DB_PORT}/{DB_NAME}
 
 
 
-@asset
+@asset(
+        compute_kind = "MinIO"
+)
 def raw_products_from_minio(context: AssetExecutionContext):
+    '''
+    เข้าถึงไฟล์ csv ใน minio เพื่อโหลดข้อมูล
+    '''
     # 1. สร้างการเชื่อมต่อกับ MinIO Client
     context.log.info(f"กำลังเชื่อมต่อกับ MinIO ที่: {MINIO_ENDPOINT}")
     
@@ -70,8 +75,13 @@ def raw_products_from_minio(context: AssetExecutionContext):
         if 'response' in locals():
             response.close()
             response.release_conn()
-@asset
+@asset(
+    compute_kind="MinIO"
+)
 def raw_inventory_from_minio(context: AssetExecutionContext):
+    '''
+    เข้าถึง minio เพื่อโหลดข้อมูลไฟล์ csv ขึ้นมา
+    '''
     # 1. สร้างการเชื่อมต่อกับ MinIO Client
     context.log.info(f"กำลังเชื่อมต่อกับ MinIO ที่: {MINIO_ENDPOINT}")
     
@@ -108,8 +118,11 @@ def raw_inventory_from_minio(context: AssetExecutionContext):
             response.close()
             response.release_conn()
 
-@asset(deps=['raw_products_from_minio'])
+@asset(deps=['raw_products_from_minio'],compute_kind="PostgreSQL")
 def product_bronze(context: AssetExecutionContext , raw_products_from_minio):
+    '''
+    เอาข้อมูลที่ได้จาก minio มา insert ลง tables stg_products
+    '''
     df = raw_products_from_minio
     
     # 1. เตรียมข้อมูลเป็น List of Tuples สำหรับ psycopg
@@ -150,8 +163,11 @@ def product_bronze(context: AssetExecutionContext , raw_products_from_minio):
     return df
 
 
-@asset(deps=['raw_inventory_from_minio'])
+@asset(deps=['raw_inventory_from_minio'],compute_kind="PostgreSQL")
 def inventory_bronze(context: AssetExecutionContext , raw_inventory_from_minio):
+    '''
+    หน้าที่ รับข้อมูลจาก minio ในส่วนของ Inventory มา Insert ใน tables stg_inventory
+    '''
     df = raw_inventory_from_minio
     
     # 1. เตรียมข้อมูลเป็น List of Tuples สำหรับ psycopg
@@ -193,8 +209,11 @@ def inventory_bronze(context: AssetExecutionContext , raw_inventory_from_minio):
     return df
 
 
-@asset(deps=['inventory_bronze'])
+@asset(deps=['inventory_bronze'],compute_kind="PostgreSQL")
 def create_dim_warehouse(context: AssetExecutionContext, inventory_bronze: pd.DataFrame):
+    '''
+    สร้าง dim_warehouse โดยใช้การทำ SCD2 เพื่อเก็บข้อมูลแบบ History
+    '''
     df_bronze = inventory_bronze
     now = datetime.now()
 
@@ -261,7 +280,7 @@ def create_dim_warehouse(context: AssetExecutionContext, inventory_bronze: pd.Da
     return df_new_wh
 
 
-@asset(deps=['product_bronze'])
+@asset(deps=['product_bronze'],compute_kind="PostgreSQL")
 def migrate_to_silver_history(context: AssetExecutionContext, product_bronze):
     """
     ขั้นตอน Silver: ทำ Vector Search และเก็บประวัติแบบ SCD Type 2 ลง PostgreSQL
@@ -349,8 +368,11 @@ def migrate_to_silver_history(context: AssetExecutionContext, product_bronze):
         "start_date", "end_date", "is_current"
     ])
 
-@asset(deps=[migrate_to_silver_history]) # 📍 ให้ทำงานหลังจากตารางหลักเสร็จ
+@asset(deps=[migrate_to_silver_history],compute_kind="PostgreSQL") # 📍 ให้ทำงานหลังจากตารางหลักเสร็จ
 def product_search_sync(context: AssetExecutionContext):
+    '''
+    เก็บข้อมูลที่ใช้สำหรับการ Search เป็น text
+    '''
     with psycopg.connect(CONN_STR) as conn:
         with conn.cursor() as cur:
             # ดึงข้อมูลที่เป็น Current เท่านั้นมารวมร่าง (Concatenate)
@@ -370,8 +392,11 @@ def product_search_sync(context: AssetExecutionContext):
             conn.commit()
             context.log.info(f"🔄 Sync Search Index สำเร็จ: {updated_count} แถว")
 
-@asset()
+@asset(compute_kind="PostgreSQL")
 def user_profile_silver(context: AssetExecutionContext , config: UserProfileConfig):
+    '''
+    ใช้สำหรับเก็บข้อมูลของลูกค้าโดย ทำเป็นรูปแบบ SCD2 เพื่อดูประวัติของผู้ใช้งานได้ เช่น มีการเปลี่ยนชื่อ , การเลื่อน Tier
+    '''
     try:
         with psycopg.connect(CONN_STR) as conn:
             with conn.cursor() as cur:
@@ -437,7 +462,7 @@ def user_profile_silver(context: AssetExecutionContext , config: UserProfileConf
         raise e
 
 
-@asset(
+@asset(compute_kind="PostgreSQL",
     description="เช็คสต็อกเหลือน้อย และแจ้งเตือนผ่าน LINE OA (Messaging API)"
 )
 def stock_alert_job(context: AssetExecutionContext):
@@ -513,7 +538,7 @@ def stock_alert_job(context: AssetExecutionContext):
         
 
     
-@asset(
+@asset(compute_kind="PostgreSQL",
     description="เช็ค Stock จบวัน Transaction ครบไหม"
 )
 def reconcile_inventory_asset(context: AssetExecutionContext):
@@ -606,7 +631,7 @@ def reconcile_inventory_asset(context: AssetExecutionContext):
 
 
 
-@asset(
+@asset(compute_kind="PostgreSQL",
     description="รัน SP เพื่อย้ายข้อมูลจาก Hot (stg_traffic_daily) ไป Cold (fct_traffic_history)"
 )
 def archive_daily_traffic(context: AssetExecutionContext):
