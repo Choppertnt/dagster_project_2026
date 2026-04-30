@@ -604,3 +604,23 @@ def reconcile_inventory_asset(context: AssetExecutionContext):
             # ส่งแจ้งเตือน
             send_line_oa_push(context, msg)
 
+
+
+@asset(
+    description="รัน SP เพื่อย้ายข้อมูลจาก Hot (stg_traffic_daily) ไป Cold (fct_traffic_history)"
+)
+def archive_daily_traffic(context: AssetExecutionContext):
+    """
+    หน้าที่: เรียกใช้ CALL public.sp_archive_daily_traffic() 
+    เพื่อย้ายข้อมูลของเมื่อวานไปเก็บ และล้างตาราง Hot ให้สะอาด
+    """
+    try:
+        with psycopg.connect(CONN_STR) as conn:
+            with conn.cursor() as cur:
+                cur.execute("CALL public.sp_archive_daily_traffic();")
+            conn.commit()
+            
+        return "✅ Successfully archived daily traffic!"
+        
+    except Exception as e:
+        raise Exception(f"❌ Failed to run Stored Procedure: {e}")

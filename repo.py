@@ -1,6 +1,6 @@
 from dagster import Definitions, load_assets_from_modules
 from assets import migrate_min_pg_asset
-from jobs.migrate_min_pg_job import  alert_job , alert_schedule , product_job , reconcile_job , reconcile_schedule
+from jobs.migrate_min_pg_job import  alert_job , alert_schedule , product_job , reconcile_job , reconcile_schedule , views_traffics_job , views_traffics_schedule
 from sensors.failure_alerts import line_oa_failure_sensor 
 from sensors.new_user import stg_userprofile_sensor
 from sensors.product_sensors import minio_product_csv_sensor
@@ -27,11 +27,11 @@ all_assets = load_assets_from_modules([migrate_min_pg_asset])
 
 defs = Definitions(
     assets=all_assets,
-    jobs=[alert_job,product_job,reconcile_job],
+    jobs=[alert_job,product_job,reconcile_job,views_traffics_job],
     resources={
             "io_manager": minio_io_manager,
             "s3": minio_resource,
         },
-    schedules = [alert_schedule,reconcile_schedule],
+    schedules = [alert_schedule,reconcile_schedule,views_traffics_schedule],
     sensors=[line_oa_failure_sensor , stg_userprofile_sensor,minio_product_csv_sensor]
 ) 

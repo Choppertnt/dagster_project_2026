@@ -1,7 +1,7 @@
 # jobs.py
 from dagster import define_asset_job, ScheduleDefinition, AssetSelection
 from assets.migrate_min_pg_asset import  stock_alert_job , raw_products_from_minio \
-    ,product_bronze , migrate_to_silver_history ,reconcile_inventory_asset
+    ,product_bronze , migrate_to_silver_history ,reconcile_inventory_asset , archive_daily_traffic
 
              # Import Asset เข้ามา
 
@@ -34,9 +34,23 @@ reconcile_schedule = ScheduleDefinition(
 )
 
 
+views_traffics_job = define_asset_job(
+    name="views_traffics_jobs",
+    selection=AssetSelection.assets(archive_daily_traffic)
+)
+
+views_traffics_schedule = ScheduleDefinition(
+    job=views_traffics_job,
+    cron_schedule="30 0 * * *", 
+    execution_timezone="Asia/Bangkok"
+)
+
+
 
 
 product_job = define_asset_job(
     name = "product_job",
     selection = AssetSelection.assets(raw_products_from_minio,product_bronze,migrate_to_silver_history)
 )
+
+
