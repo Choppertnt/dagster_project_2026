@@ -552,13 +552,28 @@ def reconcile_inventory_asset(context: AssetExecutionContext):
                 LEFT JOIN dim_products_history pro ON inven.product_id = pro.product_id
                 LEFT JOIN dim_warehouses ware ON inven.warehouse_id = ware.warehouse_id
             ),
-            brz_data AS (
-                SELECT pro.product_name, ware.warehouse_name, MIN(cdc.new_stock_level) as stock_level 
-                FROM public.brz_inventory_cdc cdc
-                LEFT JOIN dim_products_history pro ON cdc.product_id = pro.product_id
-                LEFT JOIN dim_warehouses ware ON cdc.warehouse_id = ware.warehouse_id
-                GROUP BY pro.product_name, ware.warehouse_name
-            ),
+			brz_data AS (
+				SELECT
+					product_name,
+					warehouse_name,
+					new_stock_level AS stock_level
+				FROM (
+					SELECT
+						pro.product_name,
+						ware.warehouse_name,
+						cdc.new_stock_level,
+						ROW_NUMBER() OVER (
+							PARTITION BY cdc.product_id, cdc.warehouse_id
+							ORDER BY cdc.cdc_id DESC
+						) AS rn
+					FROM public.brz_inventory_cdc cdc
+					LEFT JOIN dim_products_history pro 
+						ON cdc.product_id = pro.product_id
+					LEFT JOIN dim_warehouses ware 
+						ON cdc.warehouse_id = ware.warehouse_id
+				) t
+				WHERE rn = 1
+			),
             fct_data AS (
                 SELECT pro.product_name, ware.warehouse_name, invent.stock_level 
                 FROM public.fct_inventory_history invent
@@ -584,6 +599,7 @@ def reconcile_inventory_asset(context: AssetExecutionContext):
                                            AND COALESCE(s.warehouse_name, b.warehouse_name) = f.warehouse_name
             )
             SELECT * FROM reconcile_result 
+
 
 
             '''
