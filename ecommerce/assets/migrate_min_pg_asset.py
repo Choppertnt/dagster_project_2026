@@ -7,7 +7,7 @@ from datetime import datetime
 import urllib.parse
 import psycopg
 from urllib.parse import quote_plus
-from dagster_project_2026.ecommerce.sensors.failure_alerts import send_line_oa_push
+from ecommerce.sensors.failure_alerts import send_line_oa_push
 # ข้อมูลการเชื่อมต่อ (แนะนำให้ใช้ Environment Variables เพื่อความปลอดภัยครับ)
 MINIO_ENDPOINT = "minio.minio.svc.cluster.local:9000"
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")

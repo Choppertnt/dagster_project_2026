@@ -2,7 +2,7 @@ import os
 from minio import Minio
 from minio.error import S3Error
 from dagster import sensor, RunRequest
-from dagster_project_2026.ecommerce.jobs.migrate_min_pg_job import product_job
+from ecommerce.jobs.migrate_min_pg_job import product_job
 
 @sensor(job=product_job)
 def minio_product_csv_sensor(context):
