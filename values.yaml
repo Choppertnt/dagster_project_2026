@@ -146,22 +146,125 @@ dagsterDaemon:
 dagster-user-deployments:
   enabled: true
   deployments:
+    # -------------------------------------------------------------
+    # 1. Pipeline หลัก (repo.py)
+    # -------------------------------------------------------------
     - name: "my-data-pipeline"
       image:
         repository: "ghcr.io/choppertnt/dagster-assets" 
         tag: "latest"
         pullPolicy: Always
-      
       imagePullSecrets:
         - name: ghcr-auth
-
       dagsterApiGrpcArgs:
         - "--python-file"
         - "repo.py"
+      port: 3030
+      readinessProbe:
+        exec:
+          command: ["dagster", "api", "grpc-health-check", "-p", "3030"]
+        initialDelaySeconds: 20
+        periodSeconds: 15
+        timeoutSeconds: 10
+        failureThreshold: 5
+      env:
+        - name: HOME
+          value: "/opt/dagster/dagster_home"
+        - name: DB_HOST
+          value: "84.247.145.103"
+        - name: DB_PORT
+          valueFrom: 
+            secretKeyRef:
+              name: "db-dagster"
+              key: "DB_PORT"
+        - name: DB_USER
+          value: "dagster_user"
+        - name: DB_NAME
+          value: "postgres"
+        - name: AWS_ENDPOINT_URL 
+          value: "http://minio.minio.svc.cluster.local:9000"
+        - name: MINIO_ACCESS_KEY
+          valueFrom: 
+            secretKeyRef:
+              name: "db-dagster"
+              key: "MINIO_ACCESS_KEY"
+        - name: DB_PASS 
+          valueFrom:
+            secretKeyRef:
+              name: "db-dagster"
+              key: "postgresql-password"
+        - name: MINIO_SECRET_KEY
+          valueFrom: 
+            secretKeyRef:
+              name: "db-dagster"
+              key: "MINIO_SECRET_KEY"
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom: 
+            secretKeyRef:
+              name: "db-dagster"
+              key: "MINIO_ACCESS_KEY"
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom: 
+            secretKeyRef:
+              name: "db-dagster"
+              key: "MINIO_SECRET_KEY"
+        - name: LINE_CHANNEL_ACCESS
+          valueFrom: 
+            secretKeyRef: 
+              name: "db-dagster"
+              key: "LINE_CHANNEL_ACCESS"
+        - name: LINE_ADMIN_USER
+          valueFrom: 
+            secretKeyRef:
+              name: "db-dagster"
+              key: "LINE_ADMIN_USER"
+        - name: CLIENT_ID
+          valueFrom: 
+            secretKeyRef:
+              name: "health-secret"
+              key: "CLIENT_ID"
+        - name: CLIENT_SECRET
+          valueFrom: 
+            secretKeyRef:
+              name: "health-secret"
+              key: "CLIENT_SECRET"
+        - name: REFRESH_TOKEN
+          valueFrom: 
+            secretKeyRef:
+              name: "health-secret"
+              key: "REFRESH_TOKEN"
+        - name: GEMINI_API_KEY
+          valueFrom: 
+            secretKeyRef:
+              name: "health-secret"
+              key: "GEMINI_API_KEY"
+        - name: BACKEND_API_URL
+          valueFrom: 
+            secretKeyRef:
+              name: "health-secret"
+              key: "BACKEND_API_URL"
+
+    # -------------------------------------------------------------
+    # 2. Pipeline ด้าน Health (repo_health.py)
+    # -------------------------------------------------------------
+    - name: "health-pipeline"
+      image:
+        repository: "ghcr.io/choppertnt/dagster-assets" 
+        tag: "latest"
+        pullPolicy: Always
+      imagePullSecrets:
+        - name: ghcr-auth
+      dagsterApiGrpcArgs:
         - "--python-file"
         - "repo_health.py"
       port: 3030
-      
+      readinessProbe:
+        exec:
+          command: ["dagster", "api", "grpc-health-check", "-p", "3030"]
+        initialDelaySeconds: 20
+        periodSeconds: 15
+        timeoutSeconds: 10
+        failureThreshold: 5
       env:
         - name: HOME
           value: "/opt/dagster/dagster_home"
