@@ -168,6 +168,8 @@ dagster-user-deployments:
         timeoutSeconds: 10
         failureThreshold: 5
       env:
+        - name: PYTHONPATH
+          value: "/opt/dagster/app"
         - name: HOME
           value: "/opt/dagster/dagster_home"
         - name: DB_HOST
@@ -266,6 +268,8 @@ dagster-user-deployments:
         timeoutSeconds: 10
         failureThreshold: 5
       env:
+        - name: PYTHONPATH
+          value: "/opt/dagster/app"
         - name: HOME
           value: "/opt/dagster/dagster_home"
         - name: DB_HOST
