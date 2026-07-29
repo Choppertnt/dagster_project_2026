@@ -245,6 +245,7 @@ runLauncher:
       imagePullPolicy: "Always"
       envSecrets:
         - name: db-dagster
+        - name: health-secret
       runK8sConfig:
         jobSpecConfig:
           ttlSecondsAfterFinished: 600
