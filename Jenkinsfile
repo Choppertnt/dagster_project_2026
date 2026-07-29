@@ -89,10 +89,13 @@ spec:
                           -n ${NAMESPACE} \
                           -f values.yaml \
                           --set dagster-user-deployments.deployments[0].image.tag=${IMAGE_TAG} \
+                          --set dagster-user-deployments.deployments[1].image.tag=${IMAGE_TAG} \
                           --history-max 5
                         """
                         echo "⏳ Waiting for rollout to finish..."
-                        sh "kubectl rollout status deployment/${DEPLOYMENT_NAME} -n ${NAMESPACE}"
+                        # 🌟 เช็ก Rollout ทั้ง 2 Deployments
+                        sh "kubectl rollout status deployment/dagster-release-dagster-user-deployments-my-data-pipeline -n ${NAMESPACE}"
+                        sh "kubectl rollout status deployment/dagster-release-dagster-user-deployments-health-pipeline -n ${NAMESPACE}"
                     }
                 }
             }
@@ -100,7 +103,8 @@ spec:
                 failure {
                     container('helm-kubectl') {
                         echo "❌ Deploy พัง! กำลัง Rollback..."
-                        sh "kubectl rollout undo deployment/${DEPLOYMENT_NAME} -n ${NAMESPACE}"
+                        sh "kubectl rollout undo deployment/dagster-release-dagster-user-deployments-my-data-pipeline -n ${NAMESPACE}"
+                        sh "kubectl rollout undo deployment/dagster-release-dagster-user-deployments-health-pipeline -n ${NAMESPACE}"
                     }
                 }
             }
