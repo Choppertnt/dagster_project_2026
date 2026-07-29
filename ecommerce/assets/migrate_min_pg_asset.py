@@ -1,0 +1,667 @@
+from dagster import asset, AssetExecutionContext , AssetIn , Config , MaterializeResult
+import pandas as pd
+from minio import Minio 
+import io
+import os
+from datetime import datetime
+import urllib.parse
+import psycopg
+from urllib.parse import quote_plus
+from dagster_project_2026.ecommerce.sensors.failure_alerts import send_line_oa_push
+# ข้อมูลการเชื่อมต่อ (แนะนำให้ใช้ Environment Variables เพื่อความปลอดภัยครับ)
+MINIO_ENDPOINT = "minio.minio.svc.cluster.local:9000"
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
+
+
+
+class UserProfileConfig(Config):
+    start_after: str
+    end_at: str
+
+
+# --- ส่วนการตั้งค่า Connection ---
+DB_HOST = os.getenv("DB_HOST")
+DB_NAME = os.getenv("DB_NAME")
+DB_USER = os.getenv("DB_USER")
+DB_PASS = os.getenv("DB_PASS")
+DB_PORT = os.getenv("DB_PORT")
+
+
+encoded_pass = urllib.parse.quote_plus(DB_PASS) if DB_PASS else ""
+CONN_STR = f"postgresql://{DB_USER}:{encoded_pass}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+
+
+@asset(
+        compute_kind = "MinIO"
+)
+def raw_products_from_minio(context: AssetExecutionContext):
+    '''
+    เข้าถึงไฟล์ csv ใน minio เพื่อโหลดข้อมูล
+    '''
+    # 1. สร้างการเชื่อมต่อกับ MinIO Client
+    context.log.info(f"กำลังเชื่อมต่อกับ MinIO ที่: {MINIO_ENDPOINT}")
+    
+    client = Minio(
+        MINIO_ENDPOINT,
+        access_key=MINIO_ACCESS_KEY,
+        secret_key=MINIO_SECRET_KEY,
+        secure=False  # OpenShift route ส่วนใหญ่เป็น HTTPS
+    )
+
+    bucket_name = "external-csv" # เปลี่ยนเป็นชื่อ bucket ของพี่
+    object_name = "stg_products.csv"    # เปลี่ยนเป็นชื่อไฟล์ CSV ของพี่
+
+    try:
+        # 2. ดึงข้อมูลออกมาเป็น Stream
+        context.log.info(f"กำลังดึงไฟล์ {object_name} จาก Bucket {bucket_name}...")
+        response = client.get_object(bucket_name, object_name)
+        
+        # 3. ใช้ Pandas อ่านข้อมูลจาก Stream โดยตรง
+        # เราใช้ BytesIO เพื่อแปลงข้อมูลจาก MinIO ให้ Pandas อ่านได้เหมือนไฟล์ปกติครับ
+        df = pd.read_csv(io.BytesIO(response.read()))
+        
+        context.log.info(f"ดึงข้อมูลสำเร็จ! พบข้อมูลทั้งหมด {len(df)} รายการ")
+        context.log.info(f"คอลัมน์ที่พบ: {df.columns.tolist()}")
+
+        return df
+
+    except Exception as e:
+        context.log.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {str(e)}")
+        raise e
+    finally:
+        # ปิดการเชื่อมต่อ
+        if 'response' in locals():
+            response.close()
+            response.release_conn()
+@asset(
+    compute_kind="MinIO"
+)
+def raw_inventory_from_minio(context: AssetExecutionContext):
+    '''
+    เข้าถึง minio เพื่อโหลดข้อมูลไฟล์ csv ขึ้นมา
+    '''
+    # 1. สร้างการเชื่อมต่อกับ MinIO Client
+    context.log.info(f"กำลังเชื่อมต่อกับ MinIO ที่: {MINIO_ENDPOINT}")
+    
+    client = Minio(
+        MINIO_ENDPOINT,
+        access_key=MINIO_ACCESS_KEY,
+        secret_key=MINIO_SECRET_KEY,
+        secure=False  # OpenShift route ส่วนใหญ่เป็น HTTPS
+    )
+
+    bucket_name = "external-csv" # เปลี่ยนเป็นชื่อ bucket ของพี่
+    object_name = "stg_inventory.csv"    # เปลี่ยนเป็นชื่อไฟล์ CSV ของพี่
+
+    try:
+        # 2. ดึงข้อมูลออกมาเป็น Stream
+        context.log.info(f"กำลังดึงไฟล์ {object_name} จาก Bucket {bucket_name}...")
+        response = client.get_object(bucket_name, object_name)
+        
+        # 3. ใช้ Pandas อ่านข้อมูลจาก Stream โดยตรง
+        # เราใช้ BytesIO เพื่อแปลงข้อมูลจาก MinIO ให้ Pandas อ่านได้เหมือนไฟล์ปกติครับ
+        df = pd.read_csv(io.BytesIO(response.read()))
+        
+        context.log.info(f"ดึงข้อมูลสำเร็จ! พบข้อมูลทั้งหมด {len(df)} รายการ")
+        context.log.info(f"คอลัมน์ที่พบ: {df.columns.tolist()}")
+
+        return df
+
+    except Exception as e:
+        context.log.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {str(e)}")
+        raise e
+    finally:
+        # ปิดการเชื่อมต่อ
+        if 'response' in locals():
+            response.close()
+            response.release_conn()
+
+@asset(deps=['raw_products_from_minio'],compute_kind="PostgreSQL")
+def product_bronze(context: AssetExecutionContext , raw_products_from_minio):
+    '''
+    เอาข้อมูลที่ได้จาก minio มา insert ลง tables stg_products
+    '''
+    df = raw_products_from_minio
+    
+    # 1. เตรียมข้อมูลเป็น List of Tuples สำหรับ psycopg
+    # ตรวจสอบให้แน่ใจว่าชื่อ Column ใน DataFrame ตรงกับใน Postgres
+    records = [tuple(x) for x in df.values]
+    columns = ", ".join(df.columns)
+    
+    # สร้าง Placeholder (%s, %s, ...) ตามจำนวน Column
+    placeholders = ", ".join(["%s"] * len(df.columns))
+    
+    # 2. สร้างคำสั่ง SQL Upsert (ON CONFLICT)
+    # สมมติว่าต้องการให้ถ้าซ้ำแล้วทำการ Update ข้อมูลเดิม (เหมือน upsert ของ Supabase)
+    update_statement = ", ".join([f"{col} = EXCLUDED.{col}" for col in df.columns if col not in ['product_id', 'update_at']])
+    
+    query = f"""
+        INSERT INTO stg_products ({columns})
+        VALUES ({placeholders})
+        ON CONFLICT (product_id, update_at) 
+        DO UPDATE SET {update_statement};
+    """
+
+    context.log.info(f"กำลังส่งข้อมูล {len(df)} แถว ไปยัง PostgreSQL...")
+
+    try:
+        # 3. เชื่อมต่อและรันคำสั่ง
+        with psycopg.connect(CONN_STR) as conn:
+            with conn.cursor() as cur:
+                # ใช้ executemany เพื่อประสิทธิภาพในการส่งข้อมูลปริมาณมาก
+                cur.executemany(query, records)
+            conn.commit()
+            
+        context.log.info(f"✅ Ingest ข้อมูลสำเร็จ! บันทึกลงตาราง stg_products เรียบร้อยแล้ว")
+
+    except Exception as e:
+        context.log.error(f"❌ เกิดข้อผิดพลาดในการเชื่อมต่อ PostgreSQL: {str(e)}")
+        raise e
+        
+    return df
+
+
+@asset(deps=['raw_inventory_from_minio'],compute_kind="PostgreSQL")
+def inventory_bronze(context: AssetExecutionContext , raw_inventory_from_minio):
+    '''
+    หน้าที่ รับข้อมูลจาก minio ในส่วนของ Inventory มา Insert ใน tables stg_inventory
+    '''
+    df = raw_inventory_from_minio
+    
+    # 1. เตรียมข้อมูลเป็น List of Tuples สำหรับ psycopg
+    # ตรวจสอบให้แน่ใจว่าชื่อ Column ใน DataFrame ตรงกับใน Postgres
+    records = [tuple(x) for x in df.values]
+    columns = ", ".join(df.columns)
+    
+    # สร้าง Placeholder (%s, %s, ...) ตามจำนวน Column
+    placeholders = ", ".join(["%s"] * len(df.columns))
+    
+    # 2. สร้างคำสั่ง SQL Upsert (ON CONFLICT)
+    # สมมติว่าต้องการให้ถ้าซ้ำแล้วทำการ Update ข้อมูลเดิม (เหมือน upsert ของ Supabase)
+    
+    update_statement = ", ".join([f"{col} = EXCLUDED.{col}" for col in df.columns if col not in ['product_id', 'update_at','warehouse_id']])
+    
+    query = f"""
+        INSERT INTO stg_inventory ({columns})
+        VALUES ({placeholders})
+        ON CONFLICT (product_id,warehouse_id, last_stock_check) 
+        DO UPDATE SET {update_statement};
+    """
+
+    context.log.info(f"กำลังส่งข้อมูล {len(df)} แถว ไปยัง PostgreSQL...")
+
+    try:
+        # 3. เชื่อมต่อและรันคำสั่ง
+        with psycopg.connect(CONN_STR) as conn:
+            with conn.cursor() as cur:
+                # ใช้ executemany เพื่อประสิทธิภาพในการส่งข้อมูลปริมาณมาก
+                cur.executemany(query, records)
+            conn.commit()
+            
+        context.log.info(f"✅ Ingest ข้อมูลสำเร็จ! บันทึกลงตาราง stg_products เรียบร้อยแล้ว")
+
+    except Exception as e:
+        context.log.error(f"❌ เกิดข้อผิดพลาดในการเชื่อมต่อ PostgreSQL: {str(e)}")
+        raise e
+        
+    return df
+
+
+@asset(deps=['inventory_bronze'],compute_kind="PostgreSQL")
+def create_dim_warehouse(context: AssetExecutionContext, inventory_bronze: pd.DataFrame):
+    '''
+    สร้าง dim_warehouse โดยใช้การทำ SCD2 เพื่อเก็บข้อมูลแบบ History
+    '''
+    df_bronze = inventory_bronze
+    now = datetime.now()
+
+    if df_bronze.empty:
+        context.log.warning("⚠️ ไม่มีข้อมูลจาก Bronze Layer")
+        return pd.DataFrame()
+
+    # 1. สกัดเอาทั้ง ID และ Name มาใช้งาน (ลบแถวที่ ID ซ้ำกันออก)
+    df_new_wh = df_bronze[['warehouse_id', 'warehouse_name']].drop_duplicates().dropna(subset=['warehouse_id'])
+    
+    try:
+        with psycopg.connect(CONN_STR) as conn:
+            with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+                
+                # 2. ดึงข้อมูล "ปัจจุบัน" ใน Dim มาเทียบ
+                cur.execute("SELECT warehouse_id, warehouse_name FROM public.dim_warehouses WHERE is_current = True")
+                df_current = pd.DataFrame(cur.fetchall())
+
+                # 3. 🧠 ตรวจหาการเปลี่ยนแปลง (SCD Type 2 Logic)
+                if not df_current.empty:
+                    # เอาข้อมูลใหม่เทียบข้อมูลเก่าผ่าน warehouse_id
+                    merged = df_new_wh.merge(df_current, on='warehouse_id', how='left', suffixes=('', '_old'))
+                    
+                    # หาแถวที่: (เป็นคลังสินค้าใหม่เลย) OR (คลังสินค้าเดิมแต่ชื่อเปลี่ยนไป)
+                    changes_mask = (
+                        merged['warehouse_name_old'].isna() | 
+                        (merged['warehouse_name'] != merged['warehouse_name_old'])
+                    )
+                    df_to_process = merged[changes_mask].copy()
+                else:
+                    # ถ้าระบบเพิ่งรันครั้งแรก (ตารางว่างเปล่า) ก็เอาทั้งหมดเลย
+                    df_to_process = df_new_wh.copy()
+
+                if df_to_process.empty:
+                    context.log.info("✨ ข้อมูล Warehouse ไม่มีใหม่และไม่มีเปลี่ยนชื่อ ไม่ต้องอัปเดต")
+                    return df_new_wh
+
+                # 4. เตรียมข้อมูลเพื่อ Update/Insert
+                target_wids = df_to_process['warehouse_id'].unique().tolist()
+                new_records = [(row['warehouse_id'], row['warehouse_name'], now) for _, row in df_to_process.iterrows()]
+
+                # A. 🚫 ปิดประวัติเดิม: ถ้าเป็น ID เดิมที่เปลี่ยนชื่อ ให้ set is_current = False
+                cur.execute(
+                    "UPDATE public.dim_warehouses SET is_current = False, end_date = %s WHERE warehouse_id = ANY(%s) AND is_current = True",
+                    (now, target_wids)
+                )
+
+                # B. ✨ เพิ่มประวัติใหม่ (รวมถึงคลังใหม่แกะกล่องด้วย)
+                cur.executemany(
+                    """
+                    INSERT INTO public.dim_warehouses (warehouse_id, warehouse_name, start_date, end_date, is_current)
+                    VALUES (%s, %s, %s, '9999-12-31 23:59:59', True)
+                    """,
+                    new_records
+                )
+                
+                conn.commit()
+                context.log.info(f"✅ อัปเดต Warehouse สำเร็จ {len(new_records)} รายการ (พบรายการใหม่/เปลี่ยนชื่อ)")
+
+    except Exception as e:
+        context.log.error(f"❌ Error: {str(e)}")
+        raise e
+        
+    return df_new_wh
+
+
+@asset(deps=['product_bronze'],compute_kind="PostgreSQL")
+def migrate_to_silver_history(context: AssetExecutionContext, product_bronze):
+    """
+    ขั้นตอน Silver: ทำ Vector Search และเก็บประวัติแบบ SCD Type 2 ลง PostgreSQL
+    """
+    df_bronze = product_bronze
+    now = datetime.utcnow()
+
+    if df_bronze.empty:
+        context.log.warning("ไม่มีข้อมูลใหม่จาก Bronze Layer")
+        return pd.DataFrame()
+
+    new_records_to_insert = []
+
+    try:
+        with psycopg.connect(CONN_STR) as conn:
+            with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+                # 1. ดึงข้อมูล Active ปัจจุบันจาก Postgres มาเปรียบเทียบ
+                cur.execute("SELECT * FROM dim_products_history WHERE is_current = True")
+                current_silver_data = cur.fetchall()
+                df_current = pd.DataFrame(current_silver_data)
+
+                for _, row in df_bronze.iterrows():
+                    pid = str(row['product_id'])
+                    
+                    # ตรวจสอบว่ามีสินค้านี้ในระบบหรือยัง
+                    match = df_current[df_current['product_id'] == pid] if not df_current.empty else pd.DataFrame()
+                    
+                    has_changed = False
+                    if not match.empty:
+                        current_row = match.iloc[0]
+                        # เช็คการเปลี่ยนแปลง (ราคา หรือ ชื่อ)
+                        if (float(row['base_price']) != float(current_row['base_price']) or 
+                            str(row['product_name']) != str(current_row['product_name'])):
+                            has_changed = True
+                            
+                            # A. สั่งปิด Record เก่า (Expire)
+                            context.log.info(f"สินค้า {pid} เปลี่ยนข้อมูล -> กำลัง Expire Record เก่า")
+                            cur.execute(
+                                """
+                                UPDATE dim_products_history 
+                                SET is_current = False, end_date = %s 
+                                WHERE product_id = %s AND is_current = True
+                                """,
+                                (now, pid)
+                            )
+
+                    # กรณีเป็นสินค้าใหม่ หรือ สินค้าเดิมที่ข้อมูลเปลี่ยน
+                    if match.empty or has_changed:
+
+                        
+                        # C. เตรียมข้อมูลสำหรับ Insert ใหม่ (ใช้ Tuple เพื่อส่งเข้า Postgres)
+                        new_records_to_insert.append((
+                            pid,
+                            row['product_name'],
+                            row['category'],
+                            row['brand'],
+                            int(row['base_price']),
+                            now,
+                            None,
+                            True
+                        ))
+
+                # 2. บันทึกข้อมูลใหม่ทั้งหมดลง Silver Table (Batch Insert)
+                if new_records_to_insert:
+                    cur.executemany(
+                        """
+                        INSERT INTO dim_products_history 
+                        (product_id, product_name, category, brand, base_price, start_date, end_date, is_current)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        new_records_to_insert
+                    )
+                    conn.commit()
+                    context.log.info(f"✅ บันทึกข้อมูลลง Silver สำเร็จ {len(new_records_to_insert)} รายการ")
+                else:
+                    context.log.info("ไม่มีการเปลี่ยนแปลงข้อมูล ไม่ต้องอัปเดต Silver")
+
+    except Exception as e:
+        context.log.error(f"❌ เกิดข้อผิดพลาดในขั้นตอน Silver: {str(e)}")
+        raise e
+
+    # ส่งค่ากลับเป็น DataFrame เพื่อใช้ใน Asset ถัดไป (ถ้ามี)
+    return pd.DataFrame(new_records_to_insert, columns=[
+        "product_id", "product_name", "category", "brand", "base_price", 
+        "start_date", "end_date", "is_current"
+    ])
+
+@asset(deps=[migrate_to_silver_history],compute_kind="PostgreSQL") # 📍 ให้ทำงานหลังจากตารางหลักเสร็จ
+def product_search_sync(context: AssetExecutionContext):
+    '''
+    เก็บข้อมูลที่ใช้สำหรับการ Search เป็น text
+    '''
+    with psycopg.connect(CONN_STR) as conn:
+        with conn.cursor() as cur:
+            # ดึงข้อมูลที่เป็น Current เท่านั้นมารวมร่าง (Concatenate)
+            cur.execute("""
+                INSERT INTO product_search_index (product_id, search_text)
+                SELECT 
+                    product_id, 
+                    LOWER(product_name || ' ' || COALESCE(brand, '') || ' ' || COALESCE(category, ''))
+                FROM dim_products_history
+                WHERE is_current = TRUE
+                ON CONFLICT (product_id) 
+                DO UPDATE SET 
+                    search_text = EXCLUDED.search_text,
+                    last_updated = CURRENT_TIMESTAMP;
+            """)
+            updated_count = cur.rowcount
+            conn.commit()
+            context.log.info(f"🔄 Sync Search Index สำเร็จ: {updated_count} แถว")
+
+@asset(compute_kind="PostgreSQL")
+def user_profile_silver(context: AssetExecutionContext , config: UserProfileConfig):
+    '''
+    ใช้สำหรับเก็บข้อมูลของลูกค้าโดย ทำเป็นรูปแบบ SCD2 เพื่อดูประวัติของผู้ใช้งานได้ เช่น มีการเปลี่ยนชื่อ , การเลื่อน Tier
+    '''
+    try:
+        with psycopg.connect(CONN_STR) as conn:
+            with conn.cursor() as cur:
+                context.log.info(f"⏳ เช็คเวลา! Start: {config.start_after} | End: {config.end_at}")
+                
+            # --- Step 1: ปิดประวัติเก่า เฉพาะเมื่อมีข้อมูลใหม่ "ที่ต่างจากเดิม" เข้ามาเท่านั้น ---
+                cur.execute("""
+                    UPDATE dim_user_history d
+                    SET end_date = s_first.min_upload_date, 
+                        is_current = FALSE
+                    FROM (
+                        SELECT user_id, MIN(upload_date) as min_upload_date
+                        FROM stg_userprofile
+                        WHERE upload_date > %(start_after)s AND upload_date <= %(end_at)s
+                        GROUP BY user_id
+                    ) s_first
+                    WHERE d.user_id = s_first.user_id 
+                      AND d.is_current = TRUE
+                      -- ป้องกัน Zero-duration: ปิดเฉพาะถ้าวันเริ่มใหม่ "ไม่ใช่" วันเดียวกับวันเริ่มเดิม
+                      AND d.start_date < s_first.min_upload_date;
+                """, config.dict())
+
+                updated_rows = cur.rowcount
+
+                # --- Step 2: Insert เฉพาะแถวที่ "ยังไม่มี" ใน Dimension เท่านั้น ---
+                cur.execute("""
+                    INSERT INTO dim_user_history 
+                    (user_id, name, gender, member_tier, date_of_birth, start_date, end_date, is_current)
+                    SELECT 
+                        user_id, name, gender, member_tier, date_of_birth,
+                        upload_date AS start_date,
+                        COALESCE(next_upload_date, '9999-12-31 23:59:59') AS end_date,
+                        CASE WHEN next_upload_date IS NULL THEN TRUE ELSE FALSE END AS is_current
+                    FROM (
+                        SELECT *,
+                               LEAD(upload_date) OVER (PARTITION BY user_id ORDER BY upload_date) AS next_upload_date
+                        FROM stg_userprofile
+                        WHERE upload_date > %(start_after)s AND upload_date <= %(end_at)s
+                    ) ordered_stg
+                    WHERE NOT EXISTS (
+                        -- เช็คป้องกันการ Insert ซ้ำ ถ้ามี User+Tier+StartDate นี้อยู่แล้วไม่ต้องทำ
+                        SELECT 1 FROM dim_user_history target 
+                        WHERE target.user_id = ordered_stg.user_id 
+                          AND target.start_date = ordered_stg.upload_date
+                    );
+                """, config.dict())
+                inserted_rows = cur.rowcount
+
+                conn.commit()
+                context.log.info(f"✅ SCD Type 2 Processed: Updated {updated_rows} rows, Inserted {inserted_rows} rows.")
+                return MaterializeResult(
+                    metadata={
+                        "rows_updated": updated_rows,
+                        "rows_inserted": inserted_rows,
+                        "start_after": config.start_after,
+                        "end_at": config.end_at
+                    }
+                )
+                
+    except Exception as e:
+        conn.rollback() 
+        context.log.error(f"❌ Pipeline Failed: {e}")
+        raise e
+
+
+@asset(compute_kind="PostgreSQL",
+    description="เช็คสต็อกเหลือน้อย และแจ้งเตือนผ่าน LINE OA (Messaging API)"
+)
+def stock_alert_job(context: AssetExecutionContext):
+    with psycopg.connect(CONN_STR) as conn:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+            
+            sql = \
+            f"""
+            WITH current_stock AS (
+                SELECT 
+                    products.product_name, 
+                    warehouse.warehouse_name , 
+                    stock_level 
+                FROM fct_inventory_history c
+				LEFT JOIN public.dim_products_history products
+				ON c.fk_product_id = products.pk_id
+				LEFT JOIN public.dim_warehouses warehouse
+				ON c.fk_warehouse_id = warehouse.warehouse_id_pk
+                WHERE c.is_current = TRUE and stock_level < 10
+
+            ),
+            last_alerts AS (
+                SELECT 
+                    product_name, 
+                    warehouse_name, 
+                    MAX(alerted_at) as last_alert_time
+                FROM alert_history
+                GROUP BY product_name, warehouse_name
+            )
+
+            SELECT 
+                c.product_name, 
+                c.warehouse_name, 
+                c.stock_level,
+                l.last_alert_time
+            FROM current_stock c
+            LEFT JOIN last_alerts l 
+                ON c.product_name = l.product_name
+                AND c.warehouse_name = l.warehouse_name 
+
+            WHERE 
+                l.last_alert_time IS NULL 
+            """
+            cur.execute(sql)
+            rows = cur.fetchall()
+            
+            if not rows:
+                context.log.info("✅ No new alerts needed.")
+                return
+            
+            context.log.info(f"🔥 Found {len(rows)} items to alert!")    
+            
+            for row in rows:
+                p_id = row['product_name']
+                wh_id = row['warehouse_name']
+                qty = row['stock_level']
+
+                # แต่งข้อความ
+                msg = f"⚠️ ALARM: Low Stock!\n--------------------\n📦 Product: {p_id}\n🏭 Warehouse: {wh_id}\n📉 Qty: {qty}\n--------------------\n"
+                
+                # ส่ง LINE
+                send_line_oa_push(context,msg)
+                context.log.info(f"Sent LINE OA Push for {p_id}")
+
+                # บันทึกประวัติลง DB
+                # ⚠️ สังเกตการใช้ %s แทน f-string เพื่อความปลอดภัย
+                insert_sql = """
+                    INSERT INTO public.alert_history (product_name, warehouse_name, quantity, alerted_at)
+                    VALUES (%s, %s, %s, NOW())
+                """
+                cur.execute(insert_sql, (p_id, wh_id, qty))
+        conn.commit()
+        
+
+    
+@asset(compute_kind="PostgreSQL",
+    description="เช็ค Stock จบวัน Transaction ครบไหม"
+)
+def reconcile_inventory_asset(context: AssetExecutionContext):
+    with psycopg.connect(CONN_STR) as conn:
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+            sql = '''
+
+            WITH stg_data AS (
+                SELECT pro.product_name, ware.warehouse_name, inven.stock_level 
+                FROM public.stg_inventory inven
+                LEFT JOIN dim_products_history pro ON inven.product_id = pro.product_id
+                LEFT JOIN dim_warehouses ware ON inven.warehouse_id = ware.warehouse_id
+            ),
+			brz_data AS (
+				SELECT
+					product_name,
+					warehouse_name,
+					new_stock_level AS stock_level
+				FROM (
+					SELECT
+						pro.product_name,
+						ware.warehouse_name,
+						cdc.new_stock_level,
+						ROW_NUMBER() OVER (
+							PARTITION BY cdc.product_id, cdc.warehouse_id
+							ORDER BY cdc.cdc_id DESC
+						) AS rn
+					FROM public.brz_inventory_cdc cdc
+					LEFT JOIN dim_products_history pro 
+						ON cdc.product_id = pro.product_id
+					LEFT JOIN dim_warehouses ware 
+						ON cdc.warehouse_id = ware.warehouse_id
+				) t
+				WHERE rn = 1
+			),
+            fct_data AS (
+                SELECT pro.product_name, ware.warehouse_name, invent.stock_level 
+                FROM public.fct_inventory_history invent
+                LEFT JOIN dim_products_history pro ON invent.fk_product_id = pro.pk_id
+                LEFT JOIN dim_warehouses ware ON invent.fk_warehouse_id = ware.warehouse_id_pk
+                WHERE invent.is_current = true
+            ),
+            reconcile_result AS (
+                SELECT 
+                    COALESCE(s.product_name, b.product_name, f.product_name) AS product_name,
+                    COALESCE(s.warehouse_name, b.warehouse_name, f.warehouse_name) AS warehouse_name,
+                    s.stock_level AS stg_stock,
+                    b.stock_level AS brz_stock,
+                    f.stock_level AS fct_stock,
+                    CASE 
+                        WHEN s.stock_level = b.stock_level AND b.stock_level = f.stock_level THEN '✅ MATCH'
+                        WHEN s.stock_level IS NULL OR b.stock_level IS NULL OR f.stock_level IS NULL THEN '⚠️ MISSING_DATA'
+                        ELSE '❌ MISMATCH'
+                    END AS status_flag
+                FROM stg_data s
+                FULL OUTER JOIN brz_data b ON s.product_name = b.product_name AND s.warehouse_name = b.warehouse_name
+                FULL OUTER JOIN fct_data f ON COALESCE(s.product_name, b.product_name) = f.product_name 
+                                           AND COALESCE(s.warehouse_name, b.warehouse_name) = f.warehouse_name
+            )
+            SELECT * FROM reconcile_result 
+
+
+
+            '''
+            cur.execute(sql)
+            all_rows = cur.fetchall()
+            matched_rows = [row for row in all_rows if row['status_flag'] == '✅ MATCH']
+            error_rows = [row for row in all_rows if row['status_flag'] != '✅ MATCH']
+            total_count = len(all_rows)
+            match_count = len(matched_rows)
+            error_count = len(error_rows)
+            # ถ้าไม่มีอะไรผิดปกติ จบการทำงาน
+            if error_count == 0:
+                context.log.info(f"✅ Data Reconciliation Passed: ข้อมูลตรงกัน 100% (ตรวจสอบทั้งหมด {total_count} รายการ)")
+                return
+            
+            # ถ้าเจอตัวผิดปกติ ให้ประกอบร่างข้อความส่ง LINE
+            context.log.warning(f"⚠️ ตรวจสอบทั้งหมด {total_count} รายการ | ตรงกัน {match_count} รายการ | ไม่ตรงกัน {error_count} รายการ")
+            
+            # ✨ เพิ่มสรุปตัวเลขไว้ด้านบนของข้อความ
+            msg = f"🚨 Data Reconcile Alert! 🚨\n"
+            msg += f"📊 ตรวจสอบทั้งหมด: {total_count} รายการ\n"
+            msg += f"✅ ตรงกัน: {match_count} รายการ\n"
+            msg += f"❌ ไม่ตรงกัน: {error_count} รายการ\n"
+            msg += "-" * 20 + "\n"
+            msg += f"📌 รายละเอียดตัวที่ผิดปกติ:\n\n"
+            
+            # แสดงรายละเอียดแค่ 10 รายการแรก เหมือนเดิม
+            for i, row in enumerate(error_rows[:10]):
+                p_name = row['product_name'] or "Unknown"
+                w_name = row['warehouse_name'] or "Unknown"
+                stg = row['stg_stock'] if row['stg_stock'] is not None else 'NULL'
+                brz = row['brz_stock'] if row['brz_stock'] is not None else 'NULL'
+                fct = row['fct_stock'] if row['fct_stock'] is not None else 'NULL'
+                flag = row['status_flag']
+                
+                msg += f"📦 {p_name} ({w_name})\n"
+                msg += f"   STG: {stg} | BRZ: {brz} | FCT: {fct}\n"
+                msg += f"   Status: {flag}\n\n"
+            
+            if len(error_rows) > 10:
+                msg += f"...และอื่นๆ อีก {len(error_rows) - 10} รายการ"
+                
+            # ส่งแจ้งเตือน
+            send_line_oa_push(context, msg)
+
+
+
+@asset(compute_kind="PostgreSQL",
+    description="รัน SP เพื่อย้ายข้อมูลจาก Hot (stg_traffic_daily) ไป Cold (fct_traffic_history)"
+)
+def archive_daily_traffic(context: AssetExecutionContext):
+    """
+    หน้าที่: เรียกใช้ CALL public.sp_archive_daily_traffic() 
+    เพื่อย้ายข้อมูลของเมื่อวานไปเก็บ และล้างตาราง Hot ให้สะอาด
+    """
+    try:
+        with psycopg.connect(CONN_STR) as conn:
+            with conn.cursor() as cur:
+                cur.execute("CALL public.sp_archive_daily_traffic();")
+            conn.commit()
+            
+        return "✅ Successfully archived daily traffic!"
+        
+    except Exception as e:
+        raise Exception(f"❌ Failed to run Stored Procedure: {e}")
