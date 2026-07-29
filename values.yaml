@@ -108,6 +108,31 @@ dagsterDaemon:
         secretKeyRef:
           name: "db-dagster"
           key: "LINE_ADMIN_USER"
+    - name: CLIENT_ID
+      valueFrom: 
+        secretKeyRef:
+          name: "health-secret"
+          key: "CLIENT_ID"
+    - name: CLIENT_SECRET
+      valueFrom: 
+        secretKeyRef:
+          name: "health-secret"
+          key: "CLIENT_SECRET"
+    - name: REFRESH_TOKEN
+      valueFrom: 
+        secretKeyRef:
+          name: "health-secret"
+          key: "REFRESH_TOKEN"
+    - name: GEMINI_API_KEY
+      valueFrom: 
+        secretKeyRef:
+          name: "health-secret"
+          key: "GEMINI_API_KEY"
+    - name: BACKEND_API_URL
+      valueFrom: 
+        secretKeyRef:
+          name: "health-secret"
+          key: "BACKEND_API_URL"
   securityContext: {}
   
   volumes:
