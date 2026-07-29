@@ -1,6 +1,6 @@
 # jobs.py
 from dagster import define_asset_job, ScheduleDefinition, AssetSelection
-from dagster_project_2026.ecommerce.assets.migrate_min_pg_asset import  stock_alert_job , raw_products_from_minio \
+from ecommerce.assets.migrate_min_pg_asset import  stock_alert_job , raw_products_from_minio \
     ,product_bronze , migrate_to_silver_history ,reconcile_inventory_asset , archive_daily_traffic
 
              # Import Asset เข้ามา

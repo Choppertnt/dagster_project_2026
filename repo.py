@@ -1,9 +1,9 @@
 from dagster import Definitions, load_assets_from_modules
-from dagster_project_2026.ecommerce.assets import migrate_min_pg_asset
-from dagster_project_2026.ecommerce.jobs.migrate_min_pg_job import  alert_job , alert_schedule , product_job , reconcile_job , reconcile_schedule , views_traffics_job , views_traffics_schedule
-from dagster_project_2026.ecommerce.sensors.failure_alerts import line_oa_failure_sensor 
-from dagster_project_2026.ecommerce.sensors.new_user import stg_userprofile_sensor
-from dagster_project_2026.ecommerce.sensors.product_sensors import minio_product_csv_sensor
+from ecommerce.assets import migrate_min_pg_asset
+from ecommerce.jobs.migrate_min_pg_job import  alert_job , alert_schedule , product_job , reconcile_job , reconcile_schedule , views_traffics_job , views_traffics_schedule
+from ecommerce.sensors.failure_alerts import line_oa_failure_sensor 
+from ecommerce.sensors.new_user import stg_userprofile_sensor
+from ecommerce.sensors.product_sensors import minio_product_csv_sensor
 from dagster_aws.s3 import s3_pickle_io_manager, s3_resource
 import os
 
